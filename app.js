@@ -130,6 +130,9 @@ async function onBuild(){
     try{const r=await Tesseract.recognize(files[i],'eng');text+='\n'+r.data.text;}catch(e){}}
   busy(false);
   startReview(parsePortfolio(text));}
+function strip1(x){ // drop a spurious leading digit (OCR reads ₹ as 3/7): 326048.62 -> 26048.62
+  if(!x||x<=0)return 0;const s=x.toFixed(2),d=s.indexOf('.'),ip=s.slice(0,d);
+  if(ip.length<=1)return 0;return parseFloat(ip.slice(1)+s.slice(d));}
 function parsePortfolio(text){
   const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);const out=[];
   const isName=l=>/[A-Za-z]{4,}/.test(l)&&/(fund|etf|flexi|index|nifty|psu|multi[- ]?asset|bond|gilt|debt)/i.test(l)&&!/^(inv\.|inv\s+amt|cur\.|bal\s*units|abs\.|unr\.|as on|scheme|investor|net asset)/i.test(l);
@@ -137,16 +140,23 @@ function parsePortfolio(text){
     let name=lines[i].replace(/\s*[-–]\s*(regular\s*)?gr\b.*$/i,'').replace(/[↗➔→»]+/g,'').replace(/\s{2,}/g,' ').trim();
     if(name.length<6)continue;
     const blk=lines.slice(i,i+9).join(' ').replace(/-?\d[\d,]*\.\d+\s*%/g,' ');
-    const signed=(blk.match(/-?\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
+    const signed=(blk.match(/-?\d[\d,]*\.\d{2}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
     const pos=signed.filter(x=>x>0);
-    const units=(blk.match(/\d{1,4}(?:,\d{3})*\.\d{3}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
-    const nav4=(blk.match(/\d{1,4}(?:,\d{3})*\.\d{4}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
-    let inv=pos[0]||0,cur=pos[1]||0;
-    const cc=(units[0]&&nav4[0])?units[0]*nav4[0]:0;        // Units x NAV ≈ Current
-    if((!cur||cur<=0)&&cc>0)cur=Math.round(cc*100)/100;
-    const gain=cur-inv;                                     // Invested + Gain = Current must hold
-    const idOk=inv>0&&cur>0&&signed.some(x=>Math.abs(x-gain)<2);
-    out.push({name,inv,cur,flag:!idOk});}
+    const units=(blk.match(/\d[\d,]*\.\d{3}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
+    const nav4=(blk.match(/\d[\d,]*\.\d{4}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
+    const invR=pos[0]||0,curR=pos[1]||0;
+    const cc=(units[0]&&nav4[0])?Math.round(units[0]*nav4[0]*100)/100:0;  // Units x NAV ≈ Current
+    // candidate true values: original, or with a spurious leading OCR digit stripped (₹→3 etc.)
+    const invVars=[invR,strip1(invR)].filter(v=>v>0);
+    const curVars=[curR,strip1(curR),cc].filter(v=>v>0);
+    let inv=invR,cur=curR>0?curR:cc,fixed=false;
+    outer:for(const g of signed){for(const iv of invVars){for(const cv of curVars){
+      if(iv>0&&cv>0&&Math.abs(iv+g-cv)<2){inv=iv;cur=cv;fixed=true;break outer;}}}}
+    if(!fixed&&curR<=0&&cc<=0){ // blank current + no NAV: best-guess from stripped invested + gain
+      const ivc=strip1(invR)>0?strip1(invR):invR;
+      for(const g of signed){if(Math.abs(Math.abs(g)-invR)<2)continue;const c=ivc+g;
+        if(c>0){inv=ivc;cur=Math.round(c*100)/100;break;}}}
+    out.push({name,inv,cur,flag:!fixed});}
   const map={};
   out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
   return Object.values(map);}
