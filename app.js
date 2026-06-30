@@ -342,6 +342,39 @@ function planCal(){
 function resetGrow(){$('growAmt').value='';$('growOut').innerHTML='';}
 function resetCal(){$('calAmt').value='';$('calMonths').value='3';$('calOut').innerHTML='';}
 
+/* ---------- AI review prompt (Path 3: copy + paste into Claude/ChatGPT/Gemini) ---------- */
+function aiReview(){
+  const p=LS.g('profile',{age:'?',horizon:'?',risk:'?'});const rows=window._hrows||[];
+  if(!rows.length){alert('Build your dashboard first.');return;}
+  let ti=0,tc=0;rows.forEach(r=>{ti+=r.inv;tc+=r.cur;});
+  const lines=rows.slice().sort((a,b)=>b.cur-a.cur).map(r=>
+    `- ${r.name}: invested ₹${Math.round(r.inv).toLocaleString('en-IN')}, current ₹${Math.round(r.cur).toLocaleString('en-IN')} (${r.pl<0?'loss':'gain'} ₹${Math.round(Math.abs(r.pl)).toLocaleString('en-IN')})`).join('\n');
+  const prompt=`Act as a mutual fund advisor with 25+ years of experience in the Indian market. Give practical, specific advice — not generic tips.
+
+My profile: age ${p.age}, investment horizon ${p.horizon} years, comfort with market ups/downs: ${p.risk}.
+Portfolio today: invested ₹${Math.round(ti).toLocaleString('en-IN')}, current value ₹${Math.round(tc).toLocaleString('en-IN')}.
+
+My holdings:
+${lines}
+
+Please review and tell me, factoring in current market and geopolitical conditions:
+1) For each fund — keep, trim, or exit, with a one-line reason.
+2) Whether my asset allocation (equity / hybrid / gold-silver / debt) suits my age and horizon.
+3) Over-concentration, duplicate funds, or high-cost funds to clean up.
+4) Specific funds/categories to ADD, and a simple plan to push returns higher.
+5) Clear next steps and a sensible buying sequence if I add new money.
+
+I'm also attaching my NJ E-Wealth screenshot — cross-check the figures above against it. You are not a SEBI-registered adviser; treat this as educational.`;
+  const done=()=>{$('aiMsg').innerHTML='<span style="color:var(--green)">✓ Prompt copied. Open your AI app, paste it, and attach your NJ screenshot.</span>';};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(prompt).then(done).catch(()=>showPrompt(prompt));
+  }else showPrompt(prompt);
+}
+function showPrompt(t){
+  $('aiMsg').innerHTML='Copy this text manually:<textarea readonly style="width:100%;height:140px;margin-top:6px;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea>';
+  const ta=$('aiMsg').querySelector('textarea');ta.value=t;ta.focus();ta.select();
+}
+
 /* ---------- profile ---------- */
 function ensureProfile(){
   const age=parseInt($('age').value)||0;

@@ -145,6 +145,14 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
       <button class="btn-sec" style="border-radius:10px;padding:12px 12px" onclick="resetCal()">Reset</button></div>
     <div id="calOut" style="margin-top:12px"></div>
   </div>
+  <h2>🤖 Get a full AI review</h2>
+  <div class="card">
+    <div class="note" style="margin-bottom:10px">Copies a ready-made prompt with your profile and holdings. Paste it into your AI app (Claude / ChatGPT / Gemini) and attach your NJ screenshot for a deeper, reasoning-grade review.</div>
+    <button class="btn btn-primary" onclick="aiReview()">📋 Copy review prompt</button>
+    <div id="aiMsg" class="small" style="margin-top:8px"></div>
+    <div class="note" style="margin-top:10px">Open: <a href="https://claude.ai/new" target="_blank" rel="noopener">Claude</a> · <a href="https://chatgpt.com" target="_blank" rel="noopener">ChatGPT</a> · <a href="https://gemini.google.com/app" target="_blank" rel="noopener">Gemini</a></div>
+  </div>
+
   <div class="disclaimer">NAVs are official AMFI values (mfapi.in), fetched live in your browser; if stale, the fund is flagged and the last good value is shown. All data stays on this phone. The keep/trim/exit notes use market context current as of <b id="ctxd">Jun 2026</b> plus your age and horizon — this is an automated second opinion, not advice from a SEBI-registered adviser. Mutual funds carry market risk. Confirm any buy/sell with a registered adviser.</div>
 </div>
 </div>
