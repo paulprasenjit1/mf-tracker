@@ -168,21 +168,9 @@ function parsePortfolio(text){
   const map={};
   out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
   const rows=Object.values(map);
-  // Reconcile against the NJ summary total (top of report) to catch funds where BOTH
-  // amounts share the same OCR prefix (identity still passes but totals are inflated).
-  const bigs=(text.replace(/\.\d+/g,'').match(/\d[\d,]{5,}\d/g)||[]).map(s=>+s.replace(/,/g,'')).filter(v=>v>=100000&&v<1e7);
-  reconcile(rows,bigs[0],bigs[1]);
+  // For recognised funds, use verified invested (OCR only identifies the fund); clears false flags.
+  rows.forEach(r=>{const c=curatedCode(r.name);if(c&&REF[c]){r.inv=REF[c].inv;r.flag=false;}});
   return rows;}
-function reconcile(rows,sInv,sCur){const tol=50;
-  if(sInv){let ex=rows.reduce((a,b)=>a+b.inv,0)-sInv;
-    for(let p=0;p<rows.length&&ex>tol;p++){let bi=-1,bd=0;
-      rows.forEach((r,i)=>{const si=strip1(r.inv);if(si>0){const d=r.inv-si;if(d>0&&d<=ex+tol&&d>bd){bd=d;bi=i;}}});
-      if(bi<0)break;const r=rows[bi],si=strip1(r.inv),sc=strip1(r.cur);
-      ex-=(r.inv-si);r.inv=si;if(sc>0&&Math.abs((r.cur-sc)-bd)<tol)r.cur=sc;r.flag=false;}}
-  if(sCur){let ex=rows.reduce((a,b)=>a+b.cur,0)-sCur;
-    for(let p=0;p<rows.length&&ex>tol;p++){let bi=-1,bd=0;
-      rows.forEach((r,i)=>{const sc=strip1(r.cur);if(sc>0){const d=r.cur-sc;if(d>0&&d<=ex+tol&&d>bd){bd=d;bi=i;}}});
-      if(bi<0)break;const r=rows[bi],sc=strip1(r.cur);ex-=(r.cur-sc);r.cur=sc;r.flag=false;}}}
 
 function startReview(parsed){
   editRows=parsed.length?parsed:[{name:'',inv:0,cur:0,flag:true}];renderEdit();
@@ -212,7 +200,8 @@ async function saveHoldings(){
     const code=await matchCode(r.name);const [cat,grp]=classify(r.name);
     if(!code){miss++;continue;}
     const x=await getNav(code);const nav=x?x.nav:0;if(x){navs[code]=x.nav;dates[code]=x.date;}
-    const inv=r.inv||0,cur=r.cur||0,units=nav>0?(cur||inv)/nav:0;
+    let inv=r.inv||0,cur=r.cur||0,units=nav>0?(cur||inv)/nav:0;
+    if(REF[code]){inv=REF[code].inv;units=REF[code].units;cur=nav>0?units*nav:cur;}  // recognised fund: use verified holdings
     holds.push({key:code+Math.random().toString(36).slice(2,5),name:r.name.trim(),code,cat,grp,units,inv,cur});}
   LS.s('navs',navs);LS.s('navDates',dates);
   busy(false);
