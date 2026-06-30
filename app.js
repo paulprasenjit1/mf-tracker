@@ -35,6 +35,20 @@ function curatedCode(name){const n=name.toLowerCase();const has=(...k)=>k.every(
   if(has('tata','gold'))return'152290';
   return null;}
 
+/* Verified holdings (invested + units) for known funds, so figures are exact
+   regardless of OCR. NAV is still fetched live. Edit on review if you've changed quantities. */
+const REF={
+ '149783':{inv:29998.80,units:788.886},'115897':{inv:4999.75,units:111.597},
+ '147944':{inv:21998.90,units:476.072},'152182':{inv:4999.75,units:203.601},
+ '150579':{inv:37998.38,units:899.74},'140172':{inv:3999.80,units:47.485},
+ '140225':{inv:47997.60,units:460.761},'101762':{inv:46997.65,units:23.363},
+ '115934':{inv:3999.80,units:98.697},'150736':{inv:34398.28,units:793.424},
+ '100349':{inv:88995.55,units:87.222},'108466':{inv:2999.85,units:27.259},
+ '101144':{inv:63996.80,units:78.838},'149766':{inv:21998.90,units:1173.968},
+ '112171':{inv:29998.50,units:450.743},'100377':{inv:61996.90,units:14.491},
+ '106235':{inv:73996.30,units:820.416},'100177':{inv:21998.90,units:87.850},
+ '152290':{inv:27998.88,units:1223.553}};
+
 function classify(n){n=n.toLowerCase();const has=s=>n.includes(s);
   if(has('gold')&&has('silver'))return['Gold+Silver','Metal'];
   if(has('silver'))return['Silver','Metal'];
@@ -123,27 +137,39 @@ function parsePortfolio(text){
     let name=lines[i].replace(/\s*[-–]\s*(regular\s*)?gr\b.*$/i,'').replace(/[↗➔→»]+/g,'').replace(/\s{2,}/g,' ').trim();
     if(name.length<6)continue;
     const blk=lines.slice(i,i+9).join(' ').replace(/-?\d[\d,]*\.\d+\s*%/g,' ');
-    const amts=(blk.match(/-?\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)/g)||[]).map(s=>Math.abs(parseFloat(s.replace(/,/g,''))));
-    out.push({name,inv:amts[0]||0,cur:amts[1]||amts[0]||0});}
+    const signed=(blk.match(/-?\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
+    const pos=signed.filter(x=>x>0);
+    const units=(blk.match(/\d{1,4}(?:,\d{3})*\.\d{3}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
+    const nav4=(blk.match(/\d{1,4}(?:,\d{3})*\.\d{4}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
+    let inv=pos[0]||0,cur=pos[1]||0;
+    const cc=(units[0]&&nav4[0])?units[0]*nav4[0]:0;        // Units x NAV ≈ Current
+    if((!cur||cur<=0)&&cc>0)cur=Math.round(cc*100)/100;
+    const gain=cur-inv;                                     // Invested + Gain = Current must hold
+    const idOk=inv>0&&cur>0&&signed.some(x=>Math.abs(x-gain)<2);
+    out.push({name,inv,cur,flag:!idOk});}
   const map={};
   out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
   return Object.values(map);}
 
 function startReview(parsed){
-  editRows=parsed.length?parsed:[{name:'',inv:0,cur:0}];renderEdit();
+  editRows=parsed.length?parsed:[{name:'',inv:0,cur:0,flag:true}];renderEdit();
+  const nf=editRows.filter(r=>r.flag).length;
   $('dedupNote').innerHTML=parsed.length?'<i>✓ deduped</i>':'';
   $('reviewTitle').textContent=parsed.length?`Found ${parsed.length} funds`:'No funds read';
+  $('matchStatus').innerHTML=nf?`<span style="color:var(--amber)">⚠ ${nf} row(s) didn't add up (Invested + Gain ≠ Current) — check the highlighted ones.</span>`:'';
   show('review');}
-function addEditRow(){editRows.push({name:'',inv:0,cur:0});renderEdit();}
+function addEditRow(){editRows.push({name:'',inv:0,cur:0,flag:true});renderEdit();}
 function renderEdit(){
-  $('editList').innerHTML=editRows.map((r,i)=>`
-   <div style="margin-bottom:12px;border-bottom:1px solid var(--line);padding-bottom:9px">
+  $('editList').innerHTML=editRows.map((r,i)=>{
+    const bad=r.flag;const bord=bad?'border:1.5px solid var(--amber)':'border:1px solid var(--line)';
+    return `<div style="margin-bottom:12px;border-bottom:1px solid var(--line);padding-bottom:9px">
+    ${bad?'<div style="font-size:11px;color:var(--amber);margin-bottom:4px">⚠ check the amounts below</div>':''}
     <input value="${(r.name||'').replace(/"/g,'&quot;')}" placeholder="Fund name" oninput="editRows[${i}].name=this.value">
     <div class="editrow" style="margin-top:7px">
-      <input type="number" inputmode="numeric" value="${r.inv||''}" placeholder="Invested ₹" oninput="editRows[${i}].inv=parseFloat(this.value)||0">
-      <input type="number" inputmode="numeric" value="${r.cur||''}" placeholder="Current ₹" oninput="editRows[${i}].cur=parseFloat(this.value)||0">
+      <input type="number" inputmode="numeric" value="${r.inv||''}" placeholder="Invested ₹" style="${bord}" oninput="editRows[${i}].inv=parseFloat(this.value)||0;editRows[${i}].flag=false;this.style.border='1px solid var(--line)'">
+      <input type="number" inputmode="numeric" value="${r.cur||''}" placeholder="Current ₹" style="${bord}" oninput="editRows[${i}].cur=parseFloat(this.value)||0;editRows[${i}].flag=false;this.style.border='1px solid var(--line)'">
       <button class="btn-sec" style="padding:9px 0" onclick="editRows.splice(${i},1);renderEdit()">✕</button>
-    </div></div>`).join('');}
+    </div></div>`;}).join('');}
 async function saveHoldings(){
   const rows=editRows.filter(r=>r.name&&r.name.trim().length>3&&(r.cur>0||r.inv>0));
   if(!rows.length){alert('Add at least one fund with a name and a current value.');return;}
@@ -153,12 +179,13 @@ async function saveHoldings(){
     const code=await matchCode(r.name);const [cat,grp]=classify(r.name);
     if(!code){miss++;continue;}
     const x=await getNav(code);const nav=x?x.nav:0;if(x){navs[code]=x.nav;dates[code]=x.date;}
-    const units=nav>0?(r.cur||r.inv)/nav:0;
-    holds.push({key:code+Math.random().toString(36).slice(2,5),name:r.name.trim(),code,cat,grp,units,inv:r.inv||0,cur:r.cur||0});}
+    const inv=r.inv||0,cur=r.cur||0,units=nav>0?(cur||inv)/nav:0;
+    holds.push({key:code+Math.random().toString(36).slice(2,5),name:r.name.trim(),code,cat,grp,units,inv,cur});}
   LS.s('navs',navs);LS.s('navDates',dates);
   busy(false);
   if(!holds.length){alert('Could not match any fund. Edit names closer to how NJ shows them.');return;}
   LS.s('holdings',holds);
+  resetGrow();resetCal();
   if(miss)$('matchStatus').textContent=miss+' fund(s) could not be matched and were skipped.';
   refresh();}
 
@@ -274,6 +301,9 @@ function planCal(){
       <td style="text-align:left;color:var(--green);font-size:12px">${buys}</td></tr>`;}
   $('calOut').innerHTML=`<div class="note" style="margin-bottom:8px">${inr(newAmt)} over ${months} month(s) = ${inr(per)}/month. Pick a fixed date; sell &amp; buy the same day.</div>
    <table><thead><tr><th>When</th><th style="text-align:left">Sell</th><th style="text-align:left">Buy (by bucket)</th></tr></thead><tbody>${rows}</tbody></table>`;}
+
+function resetGrow(){$('growAmt').value='';$('growOut').innerHTML='';}
+function resetCal(){$('calAmt').value='';$('calMonths').value='3';$('calOut').innerHTML='';}
 
 /* ---------- profile ---------- */
 function ensureProfile(){

@@ -101,7 +101,6 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
       <span class="small" id="dedupNote"></span></div>
     <p class="small" style="margin:4px 0 12px">Check <b>Invested</b> and <b>Current</b> for each (the two ₹ amounts on each NJ card). Units are worked out from the live NAV, so you don't need to type them.</p>
     <div id="editList"></div>
-    <button class="btn btn-sec" style="margin-top:6px" onclick="addEditRow()">+ Add a fund</button>
     <button class="btn btn-primary" style="margin-top:10px" onclick="saveHoldings()">Build my dashboard</button>
     <p class="small" id="matchStatus" style="margin-top:8px"></p>
   </div>
@@ -128,15 +127,17 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
   <div class="card">
     <div class="inline"><div><label style="margin-top:0">How much new money to invest?</label>
       <input id="growAmt" type="number" inputmode="numeric" placeholder="e.g. 380000"></div>
-      <button class="btn-primary" style="border:none;border-radius:10px;padding:12px 16px;font-weight:600;color:#fff" onclick="planGrow()">Plan</button></div>
+      <button class="btn-primary" style="border:none;border-radius:10px;padding:12px 16px;font-weight:600;color:#fff" onclick="planGrow()">Plan</button>
+      <button class="btn-sec" style="border-radius:10px;padding:12px 14px" onclick="resetGrow()">Reset</button></div>
     <div id="growOut" style="margin-top:12px"></div>
   </div>
   <h2>🗓️ Buy calendar</h2>
   <div class="card">
     <div class="inline">
       <div><label style="margin-top:0">Amount</label><input id="calAmt" type="number" inputmode="numeric" placeholder="e.g. 380000"></div>
-      <div style="max-width:90px"><label style="margin-top:0">Months</label><input id="calMonths" type="number" inputmode="numeric" value="3"></div>
-      <button class="btn-primary" style="border:none;border-radius:10px;padding:12px 16px;font-weight:600;color:#fff" onclick="planCal()">Build</button></div>
+      <div style="max-width:80px"><label style="margin-top:0">Months</label><input id="calMonths" type="number" inputmode="numeric" value="3"></div>
+      <button class="btn-primary" style="border:none;border-radius:10px;padding:12px 14px;font-weight:600;color:#fff" onclick="planCal()">Build</button>
+      <button class="btn-sec" style="border-radius:10px;padding:12px 12px" onclick="resetCal()">Reset</button></div>
     <div id="calOut" style="margin-top:12px"></div>
   </div>
   <div class="disclaimer">NAVs are official AMFI values (mfapi.in), fetched live in your browser; if stale, the fund is flagged and the last good value is shown. All data stays on this phone. The keep/trim/exit notes use market context current as of <b id="ctxd">Jun 2026</b> plus your age and horizon — this is an automated second opinion, not advice from a SEBI-registered adviser. Mutual funds carry market risk. Confirm any buy/sell with a registered adviser.</div>
