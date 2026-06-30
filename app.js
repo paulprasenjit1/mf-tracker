@@ -167,7 +167,22 @@ function parsePortfolio(text){
     out.push({name,inv,cur,flag:!fixed});}
   const map={};
   out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
-  return Object.values(map);}
+  const rows=Object.values(map);
+  // Reconcile against the NJ summary total (top of report) to catch funds where BOTH
+  // amounts share the same OCR prefix (identity still passes but totals are inflated).
+  const bigs=(text.replace(/\.\d+/g,'').match(/\d[\d,]{5,}\d/g)||[]).map(s=>+s.replace(/,/g,'')).filter(v=>v>=100000&&v<1e7);
+  reconcile(rows,bigs[0],bigs[1]);
+  return rows;}
+function reconcile(rows,sInv,sCur){const tol=50;
+  if(sInv){let ex=rows.reduce((a,b)=>a+b.inv,0)-sInv;
+    for(let p=0;p<rows.length&&ex>tol;p++){let bi=-1,bd=0;
+      rows.forEach((r,i)=>{const si=strip1(r.inv);if(si>0){const d=r.inv-si;if(d>0&&d<=ex+tol&&d>bd){bd=d;bi=i;}}});
+      if(bi<0)break;const r=rows[bi],si=strip1(r.inv),sc=strip1(r.cur);
+      ex-=(r.inv-si);r.inv=si;if(sc>0&&Math.abs((r.cur-sc)-bd)<tol)r.cur=sc;r.flag=false;}}
+  if(sCur){let ex=rows.reduce((a,b)=>a+b.cur,0)-sCur;
+    for(let p=0;p<rows.length&&ex>tol;p++){let bi=-1,bd=0;
+      rows.forEach((r,i)=>{const sc=strip1(r.cur);if(sc>0){const d=r.cur-sc;if(d>0&&d<=ex+tol&&d>bd){bd=d;bi=i;}}});
+      if(bi<0)break;const r=rows[bi],sc=strip1(r.cur);ex-=(r.cur-sc);r.cur=sc;r.flag=false;}}}
 
 function startReview(parsed){
   editRows=parsed.length?parsed:[{name:'',inv:0,cur:0,flag:true}];renderEdit();
