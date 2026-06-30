@@ -62,6 +62,7 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
 <header class="top"><h1>MF Tracker</h1><p id="hdrsub">Your private, on-device fund tracker</p></header>
 
 <div id="setup" class="hide">
+  <button id="backSetup" class="btn-ghost hide" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px;margin-bottom:10px" onclick="backDash()">‹ Back to dashboard</button>
   <div class="card">
     <p style="font-size:16px;font-weight:600;margin:0 0 2px">Tell us about you</p>
     <p class="small" style="margin:0 0 6px">Stays on this phone. Never uploaded anywhere.</p>
@@ -89,6 +90,7 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
 </div>
 
 <div id="review" class="hide">
+  <button id="backReview" class="btn-ghost hide" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px;margin-bottom:10px" onclick="backDash()">‹ Back to dashboard</button>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:baseline">
       <p style="font-size:16px;font-weight:600;margin:0" id="reviewTitle">Review funds</p>
@@ -138,7 +140,12 @@ const $=id=>document.getElementById(id);
 let assetChart,trendChart,editRows=[];
 
 function show(id){['setup','review','dash'].forEach(s=>$(s).classList.add('hide'));$(id).classList.remove('hide');
-  $('bar').classList.toggle('hide',id!=='dash');}
+  $('bar').classList.toggle('hide',id!=='dash');
+  const hasHoldings=LS.g('holdings',[]).length>0;
+  $('backSetup').classList.toggle('hide',!(id==='setup'&&hasHoldings));
+  $('backReview').classList.toggle('hide',!(id==='review'&&hasHoldings));
+  window.scrollTo(0,0);}
+function backDash(){if(LS.g('holdings',[]).length)refresh();}
 function busy(on,t,sub){$('busy').style.display=on?'flex':'none';if(t)$('busytxt').textContent=t;$('busysub').textContent=sub||'';}
 
 function classify(n){n=n.toLowerCase();const has=s=>n.includes(s);
@@ -247,7 +254,7 @@ function renderDash(holds,navs,dates,live){
 function lagDays(d){const p=d.split('-');const dt=new Date(p[2],p[1]-1,p[0]);return Math.floor((Date.now()-dt)/864e5);}
 
 async function onBuild(){
-  if(!saveProfile())return;
+  ensureProfile();
   const files=$('shots').files;
   if(!files.length){alert('Add at least one screenshot, or use “add funds manually”.');return;}
   busy(true,'Reading screenshots…','Runs on your phone — can take a moment.');
@@ -260,19 +267,19 @@ async function onBuild(){
 function parsePortfolio(text){
   const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
   const out=[];
-  const isName=l=>/[A-Za-z]{4,}/.test(l)&&/(fund|etf|cap|gold|silver|flexi|index|nifty|psu|asset|bond|gilt|debt|growth|gr\b)/i.test(l)&&!/^(inv|cur|bal|abs|unr)/i.test(l);
+  const isName=l=>/[A-Za-z]{4,}/.test(l)&&/(fund|etf|flexi|index|nifty|psu|multi[- ]?asset|bond|gilt|debt)/i.test(l)&&!/^(inv\.|inv\s+amt|cur\.|bal\s*units|abs\.|unr\.|as on|scheme|investor|net asset)/i.test(l);
   for(let i=0;i<lines.length;i++){
     if(!isName(lines[i]))continue;
-    let name=lines[i].replace(/\s*[-–]\s*(regular\s*)?gr.*$/i,'').replace(/[↗➔→»]+/g,'').replace(/\s{2,}/g,' ').trim();
+    let name=lines[i].replace(/\s*[-–]\s*(regular\s*)?gr\b.*$/i,'').replace(/[↗➔→»]+/g,'').replace(/\s{2,}/g,' ').trim();
     if(name.length<6)continue;
-    const blk=lines.slice(i,i+7).join(' ');
-    const amts=(blk.match(/₹?\s?-?[\d,]+\.\d{2}/g)||[]).map(s=>parseFloat(s.replace(/[₹,\s]/g,'')));
-    const units=(blk.match(/\b\d{1,4}\.\d{3}\b/g)||[]).map(parseFloat);
-    const inv=amts[0]||0;
-    const unit=units.find(u=>!amts.includes(u))||units[0]||0;
-    out.push({name,inv:Math.abs(inv),units:unit});}
+    const blk=lines.slice(i,i+9).join(' ');
+    const noPct=blk.replace(/-?\d[\d,]*\.\d+\s*%/g,' ');
+    const amts=(noPct.match(/-?\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)/g)||[]).map(s=>Math.abs(parseFloat(s.replace(/,/g,''))));
+    const units=(blk.match(/\d{1,4}(?:,\d{3})*\.\d{3}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
+    out.push({name,inv:amts.length?amts[0]:0,units:units.length?units[0]:0});}
   const map={};
-  out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,22);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
+  out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);
+    if(!map[k]||o.inv>map[k].inv||(!map[k].units&&o.units))map[k]=o;});
   return Object.values(map);}
 
 function startReview(parsed){
@@ -281,7 +288,7 @@ function startReview(parsed){
   $('dedupNote').innerHTML=parsed.length?'<i>✓ deduped</i>':'';
   $('reviewTitle').textContent=parsed.length?`Found ${parsed.length} funds`:'Add your funds';
   show('review');}
-function addManualStart(){if(!saveProfile())return;startReview([{name:'',inv:0,units:0}]);}
+function addManualStart(){ensureProfile();startReview([{name:'',inv:0,units:0}]);}
 function addEditRow(){editRows.push({name:'',inv:0,units:0});renderEdit();}
 function renderEdit(){
   $('editList').innerHTML=editRows.map((r,i)=>`
@@ -317,13 +324,16 @@ async function matchCode(name){
       if(pick)return String(pick.schemeCode);}}catch(e){}}
   return null;}
 
-function saveProfile(){
+function ensureProfile(){
   const age=parseInt($('age').value)||0;
   const hz=document.querySelector('#horizonChips .chip.on');
   const rk=document.querySelector('#riskChips .chip.on');
-  if(age<18||age>90){alert('Enter a valid age.');return false;}
-  if(!hz||!rk){alert('Pick a horizon and comfort level.');return false;}
-  LS.s('profile',{age,horizon:hz.dataset.v,risk:rk.dataset.v});return true;}
+  const ex=LS.g('profile',null);
+  LS.s('profile',{
+    age:(age>=18&&age<=90)?age:(ex&&ex.age?ex.age:35),
+    horizon:hz?hz.dataset.v:(ex&&ex.horizon?ex.horizon:'5-7'),
+    risk:rk?rk.dataset.v:(ex&&ex.risk?ex.risk:'nervous')});
+  return true;}
 function loadProfileForm(){const p=LS.g('profile',null);if(!p)return;
   $('age').value=p.age;
   document.querySelectorAll('#horizonChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.v===p.horizon));
