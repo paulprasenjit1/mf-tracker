@@ -1,0 +1,342 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<title>MF Tracker</title>
+<meta name="theme-color" content="#143a8c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MF Tracker">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+:root{--card:#fff;--ink:#13213f;--muted:#667089;--green:#0f9d58;--greenbg:#e7f6ee;
+--red:#d23f3f;--redbg:#fbeaea;--amber:#c77700;--amberbg:#fdf2e2;--blue:#1457d6;--line:#e6e9f0;--page:#f4f6fb}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--page);color:var(--ink);font-size:16px}
+.wrap{max-width:480px;margin:0 auto;padding:max(14px,env(safe-area-inset-top)) 14px calc(86px + env(safe-area-inset-bottom))}
+header.top{background:linear-gradient(135deg,#143a8c,#1457d6);color:#fff;border-radius:16px;padding:16px 18px;margin-bottom:14px}
+header.top h1{margin:0 0 2px;font-size:19px}header.top p{margin:0;opacity:.85;font-size:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:12px}
+h2{font-size:16px;margin:18px 2px 9px}
+label{font-size:14px;color:var(--muted);display:block;margin:10px 0 5px}
+input,select{font-size:16px;width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{font-size:14px;padding:10px 15px;border-radius:22px;border:1px solid var(--line);color:var(--muted);background:#fff;cursor:pointer;min-height:44px;display:flex;align-items:center}
+.chip.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.btn{display:block;width:100%;text-align:center;border:none;border-radius:12px;padding:15px;font-size:16px;font-weight:600;cursor:pointer;min-height:50px}
+.btn-primary{background:#13213f;color:#fff}.btn-ghost{background:#fff;color:var(--blue);border:1px solid var(--line)}
+.btn-sec{background:#fff;color:var(--ink);border:1px solid var(--line)}
+.drop{border:2px dashed #c4cfe0;border-radius:14px;padding:24px;text-align:center;color:var(--muted)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kpi{background:var(--page);border-radius:11px;padding:12px}
+.kpi .l{font-size:12px;color:var(--muted);margin-bottom:3px}.kpi .v{font-size:20px;font-weight:700}
+.pos{color:var(--green)}.neg{color:var(--red)}
+.chart-box{height:220px;position:relative}
+.row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);gap:10px}
+.row:last-child{border-bottom:none}
+.fname{font-size:14px;font-weight:500}.fsub{font-size:11px;color:var(--muted)}
+.tag{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap}
+.t-Keep{background:var(--greenbg);color:var(--green)}.t-Trim{background:var(--amberbg);color:var(--amber)}.t-Exit{background:var(--redbg);color:var(--red)}
+.lag{color:var(--amber)}
+.allocbar{height:10px;border-radius:6px;overflow:hidden;display:flex;margin:6px 0 5px}
+.allocbar span{display:block;height:100%}
+.legend{font-size:12px;color:var(--muted)}
+.note{font-size:12.5px;color:var(--muted);line-height:1.55}
+.editrow{display:grid;grid-template-columns:1fr 78px 34px;gap:7px;align-items:center;margin-bottom:8px}
+.editrow input{padding:9px;font-size:14px}
+.small{font-size:12px;color:var(--muted)}
+.bottombar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);
+display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));max-width:480px;margin:0 auto}
+.bottombar button{flex:1;border:1px solid var(--line);background:#fff;border-radius:11px;padding:11px 6px;font-size:12px;color:var(--ink);min-height:48px}
+.hide{display:none}
+.disclaimer{font-size:11px;color:var(--muted);line-height:1.5;border-top:1px solid var(--line);padding-top:12px;margin-top:14px}
+#busy{position:fixed;inset:0;background:rgba(244,246,251,.94);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:50;text-align:center;padding:24px}
+.spin{width:34px;height:34px;border:3px solid #d4e2fb;border-top-color:var(--blue);border-radius:50%;animation:s 1s linear infinite;margin-bottom:14px}
+@keyframes s{to{transform:rotate(360deg)}}
+</style></head><body>
+
+<div id="busy"><div class="spin"></div><div id="busytxt" style="font-size:14px;color:var(--ink)">Reading screenshots…</div><div id="busysub" class="small" style="margin-top:6px"></div></div>
+
+<div class="wrap">
+<header class="top"><h1>MF Tracker</h1><p id="hdrsub">Your private, on-device fund tracker</p></header>
+
+<div id="setup" class="hide">
+  <div class="card">
+    <p style="font-size:16px;font-weight:600;margin:0 0 2px">Tell us about you</p>
+    <p class="small" style="margin:0 0 6px">Stays on this phone. Never uploaded anywhere.</p>
+    <label>Age</label>
+    <input id="age" type="number" inputmode="numeric" placeholder="36" style="width:110px">
+    <label>Investment horizon</label>
+    <div class="chips" id="horizonChips">
+      <div class="chip" data-v="<3">Under 3 yrs</div><div class="chip" data-v="3-5">3–5 yrs</div>
+      <div class="chip" data-v="5-7">5–7 yrs</div><div class="chip" data-v="7+">7+ yrs</div></div>
+    <label>Comfort with ups and downs</label>
+    <div class="chips" id="riskChips">
+      <div class="chip" data-v="calm">Calm</div><div class="chip" data-v="nervous">A bit nervous</div>
+      <div class="chip" data-v="cautious">Cautious</div></div>
+  </div>
+  <div class="card">
+    <p style="font-size:15px;font-weight:600;margin:0 0 8px">Add your portfolio</p>
+    <label for="shots" class="drop" style="display:block;cursor:pointer">
+      <div style="font-size:26px">📷</div><div style="font-weight:600;margin-top:6px">Upload NJ screenshots</div>
+      <div class="small">Add all pages. Duplicates handled automatically.</div></label>
+    <input id="shots" type="file" accept="image/*" multiple class="hide">
+    <div id="shotcount" class="small" style="margin:8px 0 0"></div>
+    <button class="btn btn-primary" style="margin-top:12px" onclick="onBuild()">Read screenshots &amp; continue</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="addManualStart()">Or add funds manually</button>
+  </div>
+</div>
+
+<div id="review" class="hide">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <p style="font-size:16px;font-weight:600;margin:0" id="reviewTitle">Review funds</p>
+      <span class="small" id="dedupNote"></span></div>
+    <p class="small" style="margin:4px 0 12px">Check the units &amp; amount for each. Fix anything OCR got wrong, then build.</p>
+    <div id="editList"></div>
+    <button class="btn btn-sec" style="margin-top:6px" onclick="addEditRow()">+ Add a fund</button>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="saveHoldings()">Build my dashboard</button>
+    <p class="small" id="matchStatus" style="margin-top:8px"></p>
+  </div>
+</div>
+
+<div id="dash" class="hide">
+  <div class="card" style="padding:11px 14px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span id="status" class="small">Loading live NAVs…</span>
+      <button class="btn-ghost" style="width:auto;padding:7px 14px;font-size:12px;border-radius:20px" onclick="refresh()">↻ Refresh</button></div>
+  </div>
+  <div class="kpis" id="kpis"></div>
+  <h2>Where your money sits</h2>
+  <div class="card"><div class="allocbar" id="allocbar"></div><div class="legend" id="alloclegend"></div>
+    <div class="chart-box" style="margin-top:8px"><canvas id="assetChart"></canvas></div></div>
+  <div class="card note" id="allocAdvice"></div>
+  <h2>Value over time</h2>
+  <div class="card"><div class="chart-box"><canvas id="trendChart"></canvas></div>
+    <div class="note" style="margin-top:6px">Saved on this phone each day you open the app.</div></div>
+  <h2>Fund-by-fund</h2>
+  <div class="card" id="holdList"></div>
+  <h2>What to do</h2>
+  <div class="card note" id="recs"></div>
+  <div class="disclaimer">NAVs are official AMFI values (mfapi.in, with a backup source), fetched live in your browser; offline shows last saved. All your data stays on this phone. Educational second opinion from an automated rules engine — not advice from a SEBI-registered adviser. Mutual funds carry market risk. Confirm any buy/sell with a registered adviser.</div>
+</div>
+</div>
+
+<div class="bottombar hide" id="bar">
+  <button onclick="refresh()">↻<br>NAVs</button>
+  <button onclick="reupload()">📷<br>Update</button>
+  <button onclick="editProfile()">⚙<br>Profile</button>
+</div>
+
+<script>
+const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
+const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
+const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
+const inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
+const $=id=>document.getElementById(id);
+let assetChart,trendChart,editRows=[];
+
+function show(id){['setup','review','dash'].forEach(s=>$(s).classList.add('hide'));$(id).classList.remove('hide');
+  $('bar').classList.toggle('hide',id!=='dash');}
+function busy(on,t,sub){$('busy').style.display=on?'flex':'none';if(t)$('busytxt').textContent=t;$('busysub').textContent=sub||'';}
+
+function classify(n){n=n.toLowerCase();const has=s=>n.includes(s);
+  if(has('gold')&&has('silver'))return['Gold+Silver','Metal'];
+  if(has('silver'))return['Silver','Metal'];
+  if(has('gold'))return['Gold','Metal'];
+  if(has('multi asset')||has('multi-asset'))return['Hybrid','Hybrid'];
+  if(has('balanced')||has('hybrid')||has('dynamic asset')||has('equity savings'))return['Hybrid','Hybrid'];
+  if(has('debt')||has('bond')||has('gilt')||has('duration')||has('liquid')||has('money market')||has('corporate'))return['Debt','Debt'];
+  if(has('nasdaq')||has('global')||has('international')||has('world')||has(' us ')||has('emerging market'))return['Global','Equity'];
+  if(has('small cap')||has('smallcap'))return['Small Cap','Equity'];
+  if(has('mid cap')||has('midcap'))return['Mid Cap','Equity'];
+  if(has('large & mid')||has('large and mid'))return['Large & Mid','Equity'];
+  if(has('psu')||has('infra')||has('pharma')||has('bank')||has('tech')||has('digital')||has('energy')||has('consumption')||has('manufacturing')||has('thematic')||has('sector')||has('healthcare')||has('fmcg'))return['Thematic','Equity'];
+  if(has('nifty')||has('sensex')||has('index')||has('large cap')||has('largecap')||has('bluechip')||has('top 100'))return['Large Cap','Equity'];
+  if(has('flexi')||has('multi cap')||has('multicap')||has('focused')||has('value')||has('contra')||has('elss')||has('tax')||has('opportunit'))return['Flexi Cap','Equity'];
+  return['Flexi Cap','Equity'];}
+
+function targets(p){
+  const base={'<3':35,'3-5':55,'5-7':65,'7+':75}[p.horizon]??60;
+  const adj={calm:5,nervous:-5,cautious:-10}[p.risk]??0;
+  let eq=Math.max(30,Math.min(85,base+adj));
+  let gold=10,hybrid=15,debt=Math.max(5,100-eq-gold-hybrid);
+  const t=eq+gold+hybrid+debt;eq=Math.round(eq*100/t);gold=Math.round(gold*100/t);hybrid=Math.round(hybrid*100/t);debt=100-eq-gold-hybrid;
+  return{equity:eq,hybrid,gold,debt};}
+
+function verdicts(holds,total,p){
+  const t=targets(p);
+  const metal=holds.filter(h=>h.grp==='Metal').reduce((a,b)=>a+b.cur,0);
+  const metalOver=metal/total*100>t.gold+3;
+  const golds=holds.filter(h=>h.grp==='Metal'&&h.cat!=='Silver').sort((a,b)=>b.cur-a.cur);
+  const keepGold=golds[0]?golds[0].key:null;
+  const byCat={};holds.forEach(h=>{if(h.grp==='Equity'){(byCat[h.cat]=byCat[h.cat]||[]).push(h);}});
+  Object.values(byCat).forEach(a=>a.sort((x,y)=>y.cur-x.cur));
+  return holds.map(h=>{let v='Keep',r='Core holding — keep.';const w=h.cur/total*100;
+    if(h.grp==='Metal'&&h.cat==='Silver'&&metalOver){v='Exit';r='Silver is very volatile and metals are overweight — trim it.';}
+    else if(h.grp==='Metal'&&metalOver&&h.key!==keepGold){v='Trim';r='Too many metal funds — consolidate into one.';}
+    else if(h.grp==='Metal'){v='Keep';r='Your single gold hedge — fine to hold.';}
+    else if(h.cat==='Thematic'&&(p.risk==='cautious'||p.risk==='nervous')){v='Exit';r='Narrow single theme — risky for your comfort level.';}
+    else if(h.grp==='Equity'&&byCat[h.cat].length>1&&byCat[h.cat][0].key!==h.key){v='Trim';r='Duplicate '+h.cat+' fund — merge into your bigger one.';}
+    else if(w<2.5){v='Trim';r='Tiny position — too small to matter; merge it.';}
+    return Object.assign({},h,{verdict:v,why:r});});}
+
+async function getNav(code){
+  for(const mk of NAV_SRCS){try{const r=await fetch(mk(code),{cache:'no-store'});const j=await r.json();
+    const d=j.data&&j.data[0];if(d&&parseFloat(d.nav)>0)return{nav:parseFloat(d.nav),date:d.date};}catch(e){}}
+  return null;}
+
+async function refresh(){
+  const holds=LS.g('holdings',[]);if(!holds.length){show('setup');return;}
+  show('dash');$('status').textContent='Refreshing live NAVs…';
+  const navs=LS.g('navs',{}),dates=LS.g('navDates',{});let live=0;
+  await Promise.all(holds.map(async h=>{const x=await getNav(h.code);if(x){navs[h.code]=x.nav;dates[h.code]=x.date;live++;}}));
+  LS.s('navs',navs);LS.s('navDates',dates);
+  renderDash(holds,navs,dates,live);}
+
+function renderDash(holds,navs,dates,live){
+  const p=LS.g('profile',{age:36,horizon:'5-7',risk:'nervous'});
+  let ti=0,tc=0;
+  let rows=holds.map(h=>{const nav=navs[h.code]||h.bnav||0;const cur=h.units*nav;ti+=h.inv;tc+=cur;
+    return Object.assign({},h,{nav,cur,pl:cur-h.inv,date:dates[h.code]});});
+  rows=verdicts(rows,tc||1,p);
+  const pl=tc-ti,metal=rows.filter(r=>r.grp==='Metal').reduce((a,b)=>a+b.cur,0);
+  $('kpis').innerHTML=[
+    ['Invested',inr(ti),holds.length+' funds',''],
+    ['Current value',inr(tc),'live NAVs',''],
+    ['Gain / loss',(pl<0?'−':'+')+inr(Math.abs(pl)),(pl/(ti||1)*100).toFixed(1)+'%',pl<0?'neg':'pos'],
+    ['Gold / silver',(metal/(tc||1)*100).toFixed(0)+'%','target ~10%','neg']
+  ].map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="v ${k[3]}">${k[1]}</div><div class="l ${k[3]}">${k[2]}</div></div>`).join('');
+  const now=new Date();
+  $('status').innerHTML=live>0?'✓ Updated '+now.toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+' · '+live+'/'+holds.length+' live':'⚠ Offline — last saved values';
+  const g=f=>rows.filter(f).reduce((a,b)=>a+b.cur,0);
+  const eq=g(r=>r.grp==='Equity'),hy=g(r=>r.grp==='Hybrid'),go=metal,de=g(r=>r.grp==='Debt');
+  const segs=[[eq,'#1457d6','Equity'],[hy,'#0f9d58','Hybrid'],[go,'#c77700','Gold/Silver'],[de,'#888780','Debt']].filter(s=>s[0]>0);
+  $('allocbar').innerHTML=segs.map(s=>`<span style="width:${s[0]/(tc||1)*100}%;background:${s[1]}"></span>`).join('');
+  $('alloclegend').textContent=segs.map(s=>`${s[2]} ${(s[0]/(tc||1)*100).toFixed(0)}%`).join(' · ');
+  if(assetChart)assetChart.destroy();
+  assetChart=new Chart($('assetChart'),{type:'doughnut',data:{labels:segs.map(s=>s[2]),datasets:[{data:segs.map(s=>s[0]),backgroundColor:segs.map(s=>s[1])}]},options:{plugins:{legend:{position:'bottom'}},cutout:'58%',responsive:true,maintainAspectRatio:false}});
+  const t=targets(p);
+  $('allocAdvice').innerHTML=`At ${p.age}, ${p.horizon} yrs, ${p.risk}: target mix about <b>${t.equity}% equity / ${t.hybrid}% hybrid / ${t.gold}% gold / ${t.debt}% debt</b>. You're at ${(eq/(tc||1)*100).toFixed(0)}% equity and ${(go/(tc||1)*100).toFixed(0)}% gold/silver now.`;
+  $('holdList').innerHTML=rows.sort((a,b)=>b.cur-a.cur).map(h=>{
+    const lag=h.date?lagDays(h.date):99;
+    const dtxt=h.date?(lag>4?`<span class="lag">NAV ${h.date} ⚠</span>`:`NAV ${h.date}`):'no live NAV';
+    return `<div class="row"><div><div class="fname">${h.name}</div><div class="fsub">${inr(h.cur)} · ${h.pl<0?'−':'+'}${inr(Math.abs(h.pl))} · ${dtxt}</div></div>
+      <span class="tag t-${h.verdict}">${h.verdict}</span></div>`;}).join('');
+  const cur={equity:eq/(tc||1)*100,hybrid:hy/(tc||1)*100,gold:go/(tc||1)*100,debt:de/(tc||1)*100};
+  const recs=[];
+  [['equity','Equity'],['hybrid','Hybrid'],['gold','Gold'],['debt','Debt']].forEach(([k,lbl])=>{
+    const diff=cur[k]-t[k];
+    if(diff>6)recs.push(`<li><b>Reduce ${lbl}</b> — about ${diff.toFixed(0)}% above target.</li>`);
+    else if(diff<-6)recs.push(`<li><b>Add to ${lbl}</b> — about ${Math.abs(diff).toFixed(0)}% below target.</li>`);});
+  const ex=rows.filter(r=>r.verdict==='Exit').length,tr=rows.filter(r=>r.verdict==='Trim').length;
+  if(ex+tr)recs.unshift(`<li><b>${ex} to exit, ${tr} to trim</b> — see tags above; spread sells over a few weeks.</li>`);
+  if(!recs.length)recs.push('<li>Allocation looks balanced for your profile. Keep investing and review every 6 months.</li>');
+  $('recs').innerHTML='<ul style="margin:0;padding-left:18px;line-height:1.7">'+recs.join('')+'</ul>';
+  let h=LS.g('history',[]);const today=now.toISOString().slice(0,10);
+  h=h.filter(x=>x.date!==today);h.push({date:today,cur:Math.round(tc)});h.sort((a,b)=>a.date.localeCompare(b.date));
+  if(h.length>120)h=h.slice(-120);LS.s('history',h);
+  const m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  if(trendChart)trendChart.destroy();
+  trendChart=new Chart($('trendChart'),{type:'line',data:{labels:h.map(x=>{const q=x.date.split('-');return q[2]+' '+m[+q[1]-1];}),
+    datasets:[{label:'Value',data:h.map(x=>x.cur),borderColor:'#1457d6',backgroundColor:'rgba(20,87,214,.08)',fill:true,tension:.25,pointRadius:2},
+    {label:'Invested',data:h.map(()=>ti),borderColor:'#9aa3b5',borderDash:[5,4],pointRadius:0}]},
+    options:{plugins:{legend:{position:'bottom'}},responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>'₹'+(v/100000).toFixed(1)+'L'}}}}});
+  show('dash');}
+function lagDays(d){const p=d.split('-');const dt=new Date(p[2],p[1]-1,p[0]);return Math.floor((Date.now()-dt)/864e5);}
+
+async function onBuild(){
+  if(!saveProfile())return;
+  const files=$('shots').files;
+  if(!files.length){alert('Add at least one screenshot, or use “add funds manually”.');return;}
+  busy(true,'Reading screenshots…','Runs on your phone — can take a moment.');
+  let text='';
+  for(let i=0;i<files.length;i++){$('busysub').textContent=`Image ${i+1} of ${files.length}…`;
+    try{const r=await Tesseract.recognize(files[i],'eng');text+='\n'+r.data.text;}catch(e){}}
+  busy(false);
+  startReview(parsePortfolio(text));}
+
+function parsePortfolio(text){
+  const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const out=[];
+  const isName=l=>/[A-Za-z]{4,}/.test(l)&&/(fund|etf|cap|gold|silver|flexi|index|nifty|psu|asset|bond|gilt|debt|growth|gr\b)/i.test(l)&&!/^(inv|cur|bal|abs|unr)/i.test(l);
+  for(let i=0;i<lines.length;i++){
+    if(!isName(lines[i]))continue;
+    let name=lines[i].replace(/\s*[-–]\s*(regular\s*)?gr.*$/i,'').replace(/[↗➔→»]+/g,'').replace(/\s{2,}/g,' ').trim();
+    if(name.length<6)continue;
+    const blk=lines.slice(i,i+7).join(' ');
+    const amts=(blk.match(/₹?\s?-?[\d,]+\.\d{2}/g)||[]).map(s=>parseFloat(s.replace(/[₹,\s]/g,'')));
+    const units=(blk.match(/\b\d{1,4}\.\d{3}\b/g)||[]).map(parseFloat);
+    const inv=amts[0]||0;
+    const unit=units.find(u=>!amts.includes(u))||units[0]||0;
+    out.push({name,inv:Math.abs(inv),units:unit});}
+  const map={};
+  out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,22);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
+  return Object.values(map);}
+
+function startReview(parsed){
+  editRows=parsed.length?parsed:[{name:'',inv:0,units:0}];
+  renderEdit();
+  $('dedupNote').innerHTML=parsed.length?'<i>✓ deduped</i>':'';
+  $('reviewTitle').textContent=parsed.length?`Found ${parsed.length} funds`:'Add your funds';
+  show('review');}
+function addManualStart(){if(!saveProfile())return;startReview([{name:'',inv:0,units:0}]);}
+function addEditRow(){editRows.push({name:'',inv:0,units:0});renderEdit();}
+function renderEdit(){
+  $('editList').innerHTML=editRows.map((r,i)=>`
+   <div style="margin-bottom:12px;border-bottom:1px solid var(--line);padding-bottom:8px">
+    <input value="${(r.name||'').replace(/"/g,'&quot;')}" placeholder="Fund name" oninput="editRows[${i}].name=this.value">
+    <div class="editrow" style="margin-top:7px">
+      <input type="number" inputmode="decimal" value="${r.units||''}" placeholder="Units" oninput="editRows[${i}].units=parseFloat(this.value)||0">
+      <input type="number" inputmode="numeric" value="${r.inv||''}" placeholder="Invested ₹" oninput="editRows[${i}].inv=parseFloat(this.value)||0">
+      <button class="btn-sec" style="padding:9px 0" onclick="editRows.splice(${i},1);renderEdit()">✕</button>
+    </div></div>`).join('');}
+
+async function saveHoldings(){
+  const rows=editRows.filter(r=>r.name&&r.name.trim().length>3&&r.units>0);
+  if(!rows.length){alert('Add at least one fund with a name and units.');return;}
+  busy(true,'Matching funds to AMFI…','Finding the official NAV code for each fund.');
+  const holds=[];let miss=0;
+  for(const r of rows){$('busysub').textContent=r.name;
+    const code=await matchCode(r.name);const [cat,grp]=classify(r.name);
+    if(code)holds.push({key:code+Math.random().toString(36).slice(2,5),name:r.name.trim(),code,cat,grp,units:r.units,inv:r.inv||0});
+    else miss++;}
+  busy(false);
+  if(!holds.length){alert('Could not match any fund to AMFI. Try names closer to how NJ shows them.');return;}
+  LS.s('holdings',holds);
+  if(miss)$('matchStatus').textContent=miss+' fund(s) could not be matched and were skipped.';
+  refresh();}
+async function matchCode(name){
+  const tries=[name,name.replace(/fund.*$/i,'fund'),name.split(/\s+/).slice(0,4).join(' ')];
+  for(const q of tries){try{const r=await fetch(SEARCH(q));const arr=await r.json();
+    if(arr&&arr.length){
+      const pick=arr.find(s=>/regular/i.test(s.schemeName)&&/growth|gr\b/i.test(s.schemeName)&&!/idcw|dividend|bonus/i.test(s.schemeName))
+        ||arr.find(s=>/growth/i.test(s.schemeName)&&!/direct|idcw|dividend|bonus/i.test(s.schemeName))
+        ||arr.find(s=>!/idcw|dividend|bonus/i.test(s.schemeName))||arr[0];
+      if(pick)return String(pick.schemeCode);}}catch(e){}}
+  return null;}
+
+function saveProfile(){
+  const age=parseInt($('age').value)||0;
+  const hz=document.querySelector('#horizonChips .chip.on');
+  const rk=document.querySelector('#riskChips .chip.on');
+  if(age<18||age>90){alert('Enter a valid age.');return false;}
+  if(!hz||!rk){alert('Pick a horizon and comfort level.');return false;}
+  LS.s('profile',{age,horizon:hz.dataset.v,risk:rk.dataset.v});return true;}
+function loadProfileForm(){const p=LS.g('profile',null);if(!p)return;
+  $('age').value=p.age;
+  document.querySelectorAll('#horizonChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.v===p.horizon));
+  document.querySelectorAll('#riskChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.v===p.risk));}
+function reupload(){show('setup');loadProfileForm();$('shots').value='';$('shotcount').textContent='';}
+function editProfile(){show('setup');loadProfileForm();}
+
+document.querySelectorAll('.chips').forEach(grp=>grp.addEventListener('click',e=>{
+  if(!e.target.classList.contains('chip'))return;
+  grp.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));e.target.classList.add('on');}));
+$('shots').addEventListener('change',()=>{const n=$('shots').files.length;$('shotcount').textContent=n?n+' image(s) selected':'';});
+
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+(function init(){const holds=LS.g('holdings',[]);
+  if(holds.length){refresh();}else{loadProfileForm();show('setup');}})();
+</script></body></html>
