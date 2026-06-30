@@ -92,7 +92,12 @@ function verdicts(holds,total,p){
     else if(h.cat==='Small Cap'){v='Keep';r=`Small-cap ${CTX.smallcap}; keep but size modestly.`;}
     else if(h.cat==='Mid Cap'){v='Keep';r=`Mid-cap ${CTX.midcap}; quality holding.`;}
     else if(h.grp==='Hybrid'){v='Keep';r=`Hybrid is ${CTX.hybrid} — your steadiness anchor.`;}
-    return Object.assign({},h,{verdict:v,why:r});});}
+    // News-aware nudge (one notch only; profile/risk rules still set the base)
+    let news='';const sig=signalFor(h);
+    if(sig&&sig.bias){const rank={Exit:0,Trim:1,Keep:2},inv={0:'Exit',1:'Trim',2:'Keep'};
+      let nr=rank[v]+(sig.bias>0?1:-1);nr=Math.max(0,Math.min(2,nr));
+      if(inv[nr]!==v){v=inv[nr];news=`📡 News (${sig.bias>0?'positive':'negative'}): ${sig.note}`;}}
+    return Object.assign({},h,{verdict:v,why:r,news});});}
 
 function lagDays(d){if(!d)return 99;const p=d.split('-');const dt=new Date(p[2],p[1]-1,p[0]);return Math.floor((Date.now()-dt)/864e5);}
 async function getNav(code){
@@ -249,6 +254,11 @@ function renderDash(holds,navs,dates,live){
   // holdings (filterable)
   window._hrows=rows.slice().sort((a,b)=>b.cur-a.cur);
   drawHold();
+  // advisor notes (richer, advisor-style analysis)
+  const ins=computeInsights(rows,p,tc,t);
+  $('insights').innerHTML='<ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px">'+ins.map(x=>`<li style="margin-bottom:6px">${x}</li>`).join('')+'</ul>';
+  updateSigStatus();
+  loadNews();
   // history + trend (with projection tail)
   let hist=LS.g('history',[]);const today=now.toISOString().slice(0,10);
   hist=hist.filter(x=>x.date!==today);hist.push({date:today,cur:Math.round(tc)});hist.sort((a,b)=>a.date.localeCompare(b.date));
@@ -270,6 +280,119 @@ function renderDash(holds,navs,dates,live){
   if($('calAmt').value)planCal();
   show('dash');}
 
+/* Advisor-style analysis: the things a real reviewer checks — concentration, fund-house
+   overload, small/mid overexposure for the risk profile, allocation gaps, cost, tax. */
+function computeInsights(rows,p,tc,t){
+  const ins=[],pct=v=>v/(tc||1)*100,grp=f=>rows.filter(f).reduce((a,b)=>a+b.cur,0);
+  const eq=grp(r=>r.grp==='Equity'),metal=grp(r=>r.grp==='Metal'),de=grp(r=>r.grp==='Debt'),hy=grp(r=>r.grp==='Hybrid');
+  const ex=rows.filter(r=>r.verdict==='Exit').length,tr=rows.filter(r=>r.verdict==='Trim').length;
+  if(ex+tr)ins.push(`<b>${ex} to exit, ${tr} to trim</b> — see the tags above. Spread the sells over a few weeks rather than one day.`);
+  if(pct(metal)>t.gold+5)ins.push(`<b>Gold/silver is ${pct(metal).toFixed(0)}%</b> vs a ~${t.gold}% target. Silver is ${CTX.silver} — trim metals into strength, keep one gold fund.`);
+  const sm=grp(r=>r.cat==='Small Cap'||r.cat==='Mid Cap'),cap={cautious:15,nervous:22,calm:30}[p.risk]||22;
+  if(pct(sm)>cap)ins.push(`<b>Small + mid cap is ${pct(sm).toFixed(0)}%</b> of equity-heavy risk — on the high side for "${p.risk}" (~${cap}% suits you). Keep your winners, don't add more.`);
+  if(pct(de)<3&&t.debt>=8)ins.push(`<b>Almost no debt</b> — add ~${t.debt}% in a short-duration or corporate-bond fund to cushion the equity swings.`);
+  if(!rows.some(r=>r.cat==='Global'))ins.push(`<b>No global exposure</b> — a small (~5%) US/global fund adds diversification Indian funds can't.`);
+  if(!rows.some(r=>/index|nifty|sensex/i.test(r.name)))ins.push(`<b>No low-cost index fund</b> — a Nifty 50 index fund is a cheap, steady core. Also: Direct plans cost ~1%/yr less than the Regular plans bought via a distributor.`);
+  if(rows.length>10)ins.push(`<b>${rows.length} funds is a lot</b> — beyond ~8–9 you mostly duplicate. Consolidating cuts overlap and tracking effort.`);
+  const big=rows.slice().sort((a,b)=>b.cur-a.cur)[0];
+  if(big&&pct(big.cur)>25)ins.push(`<b>${big.name} is ${pct(big.cur).toFixed(0)}%</b> of the portfolio — a large single-fund bet; avoid adding more to it.`);
+  const byAmc={};rows.forEach(r=>{const a=r.name.split(/\s+/)[0];byAmc[a]=(byAmc[a]||0)+r.cur;});
+  const top=Object.entries(byAmc).sort((a,b)=>b[1]-a[1])[0];
+  if(top&&pct(top[1])>38)ins.push(`<b>${top[0]} funds are ${pct(top[1]).toFixed(0)}%</b> of your money — spread across more fund houses to cut single-AMC risk.`);
+  const losers=rows.filter(r=>r.pl<0).sort((a,b)=>a.pl-b.pl);
+  if(losers.length)ins.push(`<b>Tax tip:</b> booking the losses on your exits (e.g. ${losers[0].name}) can offset capital-gains tax this year.`);
+  ins.push(`<b>Discipline:</b> stagger fresh money over a few months, keep 3–6 months of expenses outside this in a liquid fund, and review every 6 months — not daily.`);
+  ins.push(`<span style="color:var(--muted)">These notes use a fixed rules engine + market context as of ${CTX.asof}. For live news and deeper reasoning, use the "Get a full AI review" button below.</span>`);
+  return ins;}
+
+/* ---------- News-aware signals (AI-assisted, free; copy prompt → run in AI → paste back) ---------- */
+const SIG_KEYS=['silver','gold','smallcap','midcap','largecap','flexi','thematic','global','hybrid','debt','equity','metals'];
+function getSignals(){const s=LS.g('signals',null);if(!s)return null;if(Date.now()-s.t>14*864e5)return null;return s;}
+function sigKeyFor(h){
+  const m={'Silver':'silver','Gold':'gold','Gold+Silver':'gold','Small Cap':'smallcap','Mid Cap':'midcap','Large Cap':'largecap','Large & Mid':'largecap','Flexi Cap':'flexi','Thematic':'thematic','Global':'global'}[h.cat];
+  const broad=h.grp==='Metal'?'metals':(h.grp==='Hybrid'?'hybrid':(h.grp==='Debt'?'debt':'equity'));
+  return [m,broad].filter(Boolean);}
+function signalFor(h){const s=getSignals();if(!s)return null;
+  for(const k of sigKeyFor(h)){if(s.items[k])return s.items[k];}return null;}
+function copySignalPrompt(){
+  const rows=window._hrows||LS.g('holdings',[]);
+  const cats=[...new Set(rows.map(r=>r.cat).filter(Boolean))];
+  const present=[...new Set(rows.flatMap(r=>sigKeyFor(r)))];
+  const prompt=`You are an investment strategist. Using TODAY'S market and geopolitical news relevant to Indian mutual fund investors, give a SHORT-TERM bias for each asset bucket below.
+
+My buckets: ${present.join(', ')}.
+(My fund categories: ${cats.join(', ')}.)
+
+Reply with ONLY this block, one line per bucket, no other text:
+SIGNALS:
+<bucket>=<-1|0|+1> | <reason in <=8 words citing the news>
+
+Rules: +1 = bullish (favor holding/adding), 0 = neutral, -1 = bearish (favor trimming). Allowed buckets: ${SIG_KEYS.join(', ')}. Only include buckets you have a clear, news-backed view on.`;
+  const done=()=>{$('sigMsg').innerHTML='<span style="color:var(--green)">✓ Prompt copied. Run it in your AI app, copy its SIGNALS block, then tap "Paste result".</span>';};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(prompt).then(done).catch(()=>{$('sigInput').value=prompt;toggleSignalPaste(true);});
+  else{$('sigMsg').textContent='Copy not supported — long-press to copy from the paste box.';}}
+function toggleSignalPaste(show){const el=$('sigPaste');if(show===true){el.classList.remove('hide');return;}el.classList.toggle('hide');}
+function applySignals(){
+  const txt=($('sigInput').value||'').trim();if(!txt){alert('Paste the AI SIGNALS block first.');return;}
+  const items={};let n=0;
+  txt.split('\n').forEach(line=>{const m=line.match(/^\s*([a-z&]+)\s*=\s*([+-]?\d)\s*\|\s*(.+?)\s*$/i);
+    if(m){const k=m[1].toLowerCase();if(SIG_KEYS.includes(k)){const b=Math.max(-1,Math.min(1,parseInt(m[2])||0));items[k]={bias:b,note:m[3].slice(0,80)};n++;}}});
+  if(!n){alert('Couldn\'t read any signals. Expected lines like: silver=+1 | reclassified as precious metal');return;}
+  LS.s('signals',{t:Date.now(),items});
+  $('sigMsg').innerHTML=`<span style="color:var(--green)">✓ Applied ${n} signal(s). Verdicts updated.</span>`;
+  $('sigPaste').classList.add('hide');$('sigInput').value='';
+  refresh();}
+function clearSignals(){localStorage.removeItem('signals');$('sigInput').value='';$('sigMsg').textContent='Signals cleared.';refresh();}
+function updateSigStatus(){
+  const s=getSignals();const el=$('sigStatus');if(!el)return;
+  if(!s){el.innerHTML='No news signals applied. Tap <b>Copy news prompt</b>, run it in your AI app, and paste the result back — current news will then nudge the verdicts (one notch, with guardrails).';return;}
+  const age=Math.floor((Date.now()-s.t)/864e5);
+  const arrow=b=>b>0?'<span style="color:var(--green)">↑</span>':(b<0?'<span style="color:var(--red)">↓</span>':'→');
+  const list=Object.entries(s.items).map(([k,v])=>`${k} ${arrow(v.bias)}`).join(' · ');
+  el.innerHTML=`<b>News signals active</b> (${age}d old, expire in ${14-age}d): ${list}. <span style="color:var(--muted)">Verdicts below reflect these.</span>`;}
+
+/* ---------- Market & MF news (free public RSS via CORS proxy; best-effort) ---------- */
+const NEWS_FEEDS=[
+  ['Economic Times','https://economictimes.indiatimes.com/mutual-funds/rssfeeds/360793467.cms'],
+  ['Livemint','https://www.livemint.com/rss/money'],
+  ['Moneycontrol','https://www.moneycontrol.com/rss/mutualfunds.xml'],
+  ['Business Standard','https://www.business-standard.com/rss/markets-106.rss']];
+const PROXIES=[u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),
+               u=>'https://corsproxy.io/?url='+encodeURIComponent(u)];
+const NEWS_LINKS=`<div class="note" style="margin-top:6px">Open directly:
+  <a href="https://www.moneycontrol.com/mutual-funds/" target="_blank" rel="noopener">Moneycontrol MF</a> ·
+  <a href="https://www.valueresearchonline.com/funds/" target="_blank" rel="noopener">Value Research</a> ·
+  <a href="https://economictimes.indiatimes.com/mutual-funds" target="_blank" rel="noopener">ET MF</a></div>`;
+async function fetchFeed(url){
+  for(const px of PROXIES){try{
+    const r=await fetch(px(url),{cache:'no-store'});const txt=await r.text();
+    const xml=new DOMParser().parseFromString(txt,'text/xml');
+    const items=[...xml.querySelectorAll('item')].slice(0,5).map(it=>({
+      title:(it.querySelector('title')||{}).textContent||'',
+      link:(it.querySelector('link')||{}).textContent||'',
+      date:(it.querySelector('pubDate')||{}).textContent||''}));
+    if(items.length)return items;
+  }catch(e){}}
+  return [];}
+async function loadNews(){
+  const cache=LS.g('news',null);
+  if(cache&&Date.now()-cache.t<2*3600*1000){renderNews(cache.items);return;}
+  let all=[];
+  for(const [src,url] of NEWS_FEEDS){const items=await fetchFeed(url);
+    items.forEach(i=>i.src=src);all=all.concat(items);if(all.length>=8)break;}
+  // dedupe by title, keep newest order
+  const seen={},uniq=[];all.forEach(i=>{const k=(i.title||'').slice(0,40);if(i.title&&!seen[k]){seen[k]=1;uniq.push(i);}});
+  if(uniq.length){LS.s('news',{t:Date.now(),items:uniq.slice(0,8)});renderNews(uniq.slice(0,8));}
+  else renderNews(null);}
+function renderNews(items){
+  if(!items||!items.length){$('news').innerHTML='<div class="note">Couldn\'t load live headlines right now (the free news source may be busy).</div>'+NEWS_LINKS;return;}
+  const fmt=d=>{try{const x=new Date(d);return x.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});}catch(e){return '';}};
+  $('news').innerHTML=items.map(i=>`<div class="row" style="padding:9px 0">
+    <a href="${i.link}" target="_blank" rel="noopener" style="flex:1;color:var(--ink);text-decoration:none">
+      <div class="fname" style="font-weight:400">${i.title}</div>
+      <div class="fsub">${i.src||''}${i.date?' · '+fmt(i.date):''}</div></a>
+    <span style="color:var(--blue);font-size:12px">↗</span></div>`).join('')+NEWS_LINKS;}
+
 let HOLDF='all';
 function drawHold(){
   const rows=window._hrows||[];const r=HOLDF==='all'?rows:rows.filter(x=>x.verdict===HOLDF);
@@ -278,9 +401,10 @@ function drawHold(){
     b.textContent=f==='all'?`All (${rows.length})`:`${f} (${n})`;b.classList.toggle('on',f===HOLDF);});
   $('holdList').innerHTML=r.length?r.map(h=>{
     const lag=lagDays(h.date);const dtxt=h.date?(lag>4?`<span class="lag">NAV ${h.date} ⚠</span>`:`NAV ${h.date}`):'no live NAV';
+    const newsln=h.news?`<div class="why" style="color:var(--blue)">${h.news}</div>`:'';
     return `<div class="row"><div style="flex:1"><div class="fname">${h.name}</div>
       <div class="fsub">${inr(h.cur)} · ${h.pl<0?'−':'+'}${inr(Math.abs(h.pl))} · ${dtxt}</div>
-      <div class="why">${h.why}</div></div><span class="tag t-${h.verdict}">${h.verdict}</span></div>`;}).join(''):'<div class="note" style="padding:8px 0">No funds in this group.</div>';}
+      <div class="why">${h.why}</div>${newsln}</div><span class="tag t-${h.verdict}">${h.verdict}</span></div>`;}).join(''):'<div class="note" style="padding:8px 0">No funds in this group.</div>';}
 document.querySelectorAll('#holdFilters button').forEach(b=>b.onclick=()=>{HOLDF=b.dataset.f;drawHold();});
 
 /* ---------- Plan to grow (input-driven) ---------- */
