@@ -9,7 +9,7 @@ WHAT IT DOES
 - NAVs refresh live every time you open it. No data ever leaves your phone.
 
 FILES IN THIS FOLDER (upload ALL of them):
-  index.html, manifest.webmanifest, sw.js,
+  index.html, app.js, manifest.webmanifest, sw.js,
   icon-192.png, icon-512.png, apple-touch-icon.png
 
 PUT IT ON YOUR IPHONE (GitHub Pages, public, NO personal data in files)
@@ -28,7 +28,10 @@ USING IT
 - NAVs: refresh automatically on every open (and the rotate button). Two sources
   are tried; if both fail it shows last saved values and flags lagging NAVs.
 - Portfolio changed (bought/sold): tap "Update" (bottom bar) and upload new
-  screenshots — it rebuilds. Or "add funds manually".
+  screenshots — it rebuilds.
+- On the review screen you confirm two rupee amounts per fund (Invested and
+  Current). Units are worked out from the live NAV, so OCR mistakes on the tiny
+  unit numbers no longer matter.
 - Profile change: tap "Profile" to update age/horizon/comfort.
 
 NOTES / LIMITS (Phase 1)
