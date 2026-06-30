@@ -145,17 +145,25 @@ function parsePortfolio(text){
     const units=(blk.match(/\d[\d,]*\.\d{3}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
     const nav4=(blk.match(/\d[\d,]*\.\d{4}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
     const invR=pos[0]||0,curR=pos[1]||0;
-    const cc=(units[0]&&nav4[0])?Math.round(units[0]*nav4[0]*100)/100:0;  // Units x NAV ≈ Current
-    // candidate true values: original, or with a spurious leading OCR digit stripped (₹→3 etc.)
-    const invVars=[invR,strip1(invR)].filter(v=>v>0);
-    const curVars=[curR,strip1(curR),cc].filter(v=>v>0);
-    let inv=invR,cur=curR>0?curR:cc,fixed=false;
-    outer:for(const g of signed){for(const iv of invVars){for(const cv of curVars){
-      if(iv>0&&cv>0&&Math.abs(iv+g-cv)<2){inv=iv;cur=cv;fixed=true;break outer;}}}}
-    if(!fixed&&curR<=0&&cc<=0){ // blank current + no NAV: best-guess from stripped invested + gain
-      const ivc=strip1(invR)>0?strip1(invR):invR;
-      for(const g of signed){if(Math.abs(Math.abs(g)-invR)<2)continue;const c=ivc+g;
-        if(c>0){inv=ivc;cur=Math.round(c*100)/100;break;}}}
+    const sInv=strip1(invR),sCur=strip1(curR);                 // value with a spurious leading OCR digit removed (₹→3/7)
+    const cc=(units[0]&&nav4[0])?Math.round(units[0]*nav4[0]*100)/100:0;   // Units x NAV = reliable Current
+    const invVars=[invR,sInv].filter(v=>v>0);
+    const curVars=[curR,sCur].filter(v=>v>0);
+    let inv=invR,cur=curR>0?curR:0,fixed=false;
+    if(cc>0){                                                  // anchor on Units x NAV
+      const m=curVars.find(v=>Math.abs(v-cc)/cc<0.02);
+      cur=(m!=null)?m:cc;fixed=true;
+      const ig=invVars.find(iv=>signed.some(g=>Math.abs(iv+g-cur)<2));   // confirm invested via Inv+Gain=Cur
+      if(ig!=null)inv=ig;
+      else{const c=invVars.slice().sort((a,b)=>Math.abs(a-cur)-Math.abs(b-cur));inv=(c[0]&&Math.abs(c[0]-cur)/cur<2)?c[0]:invR;}
+    }else{                                                     // no NAV: use Inv + Gain = Cur identity
+      outer:for(const g of signed){for(const iv of invVars){for(const cv of curVars){
+        if(Math.abs(iv+g-cv)<2){inv=iv;cur=cv;fixed=true;break outer;}}}}
+      if(!fixed){                                              // blank/garbled current: derive from stripped invested + gain
+        const base=sInv>0?sInv:invR;
+        for(const g of signed){if(Math.abs(Math.abs(g)-invR)<2||Math.abs(Math.abs(g)-sInv)<2)continue;
+          const c=base+g;if(c>0){inv=base;cur=Math.round(c*100)/100;fixed=true;break;}}}
+    }
     out.push({name,inv,cur,flag:!fixed});}
   const map={};
   out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
@@ -228,20 +236,15 @@ function renderDash(holds,navs,dates,live){
   const segs=[[eq,'#1457d6','Equity'],[hy,'#0f9d58','Hybrid'],[go,'#c77700','Gold/Silver'],[de,'#888780','Debt']].filter(s=>s[0]>0);
   $('allocbar').innerHTML=segs.map(s=>`<span style="width:${s[0]/(tc||1)*100}%;background:${s[1]}"></span>`).join('');
   $('alloclegend').textContent=segs.map(s=>`${s[2]} ${(s[0]/(tc||1)*100).toFixed(0)}%`).join(' · ');
-  if(assetChart)assetChart.destroy();
-  assetChart=new Chart($('assetChart'),{type:'doughnut',data:{labels:segs.map(s=>s[2]),datasets:[{data:segs.map(s=>s[0]),backgroundColor:segs.map(s=>s[1])}]},options:{plugins:{legend:{position:'bottom'}},cutout:'58%',responsive:true,maintainAspectRatio:false}});
   const t=targets(p);
   $('allocAdvice').innerHTML=`At ${p.age}, ${p.horizon} yrs, ${p.risk}: target about <b>${t.equity}% equity / ${t.hybrid}% hybrid / ${t.gold}% gold / ${t.debt}% debt</b>. You're at ${(eq/(tc||1)*100).toFixed(0)}% equity, ${(go/(tc||1)*100).toFixed(0)}% gold/silver.`;
   // projection
   const yrs=HZYRS[p.horizon],r=blendedReturn(t);
   const fv=tc*Math.pow(1+r,yrs),fv12=tc*Math.pow(1.12,yrs);
   $('projection').innerHTML=`Over your <b>${yrs}-yr</b> horizon, this mix targets ~<b>${(r*100).toFixed(1)}%</b>/yr → about <b>${inr(fv)}</b> from today's ${inr(tc)} (no fresh money). To reach a 12%/yr path (~${inr(fv12)}) you'd need a more equity-heavy, more volatile portfolio. <span style="color:var(--muted)">Illustrative, not a promise.</span>`;
-  // holdings
-  $('holdList').innerHTML=rows.sort((a,b)=>b.cur-a.cur).map(h=>{
-    const lag=lagDays(h.date);const dtxt=h.date?(lag>4?`<span class="lag">NAV ${h.date} ⚠</span>`:`NAV ${h.date}`):'no live NAV';
-    return `<div class="row"><div style="flex:1"><div class="fname">${h.name}</div>
-      <div class="fsub">${inr(h.cur)} · ${h.pl<0?'−':'+'}${inr(Math.abs(h.pl))} · ${dtxt}</div>
-      <div class="why">${h.why}</div></div><span class="tag t-${h.verdict}">${h.verdict}</span></div>`;}).join('');
+  // holdings (filterable)
+  window._hrows=rows.slice().sort((a,b)=>b.cur-a.cur);
+  drawHold();
   // history + trend (with projection tail)
   let hist=LS.g('history',[]);const today=now.toISOString().slice(0,10);
   hist=hist.filter(x=>x.date!==today);hist.push({date:today,cur:Math.round(tc)});hist.sort((a,b)=>a.date.localeCompare(b.date));
@@ -263,6 +266,19 @@ function renderDash(holds,navs,dates,live){
   if($('calAmt').value)planCal();
   show('dash');}
 
+let HOLDF='all';
+function drawHold(){
+  const rows=window._hrows||[];const r=HOLDF==='all'?rows:rows.filter(x=>x.verdict===HOLDF);
+  document.querySelectorAll('#holdFilters button').forEach(b=>{
+    const f=b.dataset.f;const n=f==='all'?rows.length:rows.filter(x=>x.verdict===f).length;
+    b.textContent=f==='all'?`All (${rows.length})`:`${f} (${n})`;b.classList.toggle('on',f===HOLDF);});
+  $('holdList').innerHTML=r.length?r.map(h=>{
+    const lag=lagDays(h.date);const dtxt=h.date?(lag>4?`<span class="lag">NAV ${h.date} ⚠</span>`:`NAV ${h.date}`):'no live NAV';
+    return `<div class="row"><div style="flex:1"><div class="fname">${h.name}</div>
+      <div class="fsub">${inr(h.cur)} · ${h.pl<0?'−':'+'}${inr(Math.abs(h.pl))} · ${dtxt}</div>
+      <div class="why">${h.why}</div></div><span class="tag t-${h.verdict}">${h.verdict}</span></div>`;}).join(''):'<div class="note" style="padding:8px 0">No funds in this group.</div>';}
+document.querySelectorAll('#holdFilters button').forEach(b=>b.onclick=()=>{HOLDF=b.dataset.f;drawHold();});
+
 /* ---------- Plan to grow (input-driven) ---------- */
 function bucketTotals(){const r=window._rows||[];const g=f=>r.filter(f).reduce((a,b)=>a+b.cur,0);
   return{equity:g(x=>x.grp==='Equity'),hybrid:g(x=>x.grp==='Hybrid'),gold:g(x=>x.grp==='Metal'),debt:g(x=>x.grp==='Debt'),total:window._tot||0};}
@@ -274,38 +290,45 @@ function planGrow(){
   const rd=n=>Math.max(0,Math.round(n/1000)*1000);
   const keepers=(window._rows||[]).filter(x=>x.verdict==='Keep');
   const rows=[];
-  // equity: existing keepers scaled + NEW index + NEW global
   const eqKeep=keepers.filter(x=>x.grp==='Equity');const eqCur=eqKeep.reduce((a,b)=>a+b.cur,0)||1;
   const idxAmt=rd(tgt.equity*0.20),gloAmt=rd(tgt.equity*0.08),restEq=tgt.equity-idxAmt-gloAmt;
-  eqKeep.forEach(f=>rows.push([f.name,f.cat,rd(restEq*f.cur/eqCur),'Top-up']));
-  if(!(window._rows||[]).some(x=>x.cat==='Large Cap'&&/index|nifty/i.test(x.name)))rows.push(['Nifty 50 Index Fund','Large-cap index',idxAmt,'NEW']);
-  if(!(window._rows||[]).some(x=>x.cat==='Global'))rows.push(['Global / Nasdaq 100 FoF','Global equity',gloAmt,'NEW']);
-  // hybrid
+  eqKeep.forEach(f=>rows.push([f.name,f.cat,rd(restEq*f.cur/eqCur),'Top-up',`Quality ${f.cat.toLowerCase()} you already hold.`]));
+  if(!(window._rows||[]).some(x=>/index|nifty/i.test(x.name)))rows.push(['Nifty 50 Index Fund','Large-cap index',idxAmt,'NEW','Low-cost core; less reliance on any one manager.']);
+  if(!(window._rows||[]).some(x=>x.cat==='Global'))rows.push(['Global / Nasdaq 100 FoF','Global equity',gloAmt,'NEW',`Adds global exposure you don't have today (~${Math.round(gloAmt/total*100)}%).`]);
   const hyb=keepers.find(x=>x.grp==='Hybrid');
-  rows.push([hyb?hyb.name:'Multi-Asset / Balanced Advantage',hyb?'Hybrid':'Hybrid (NEW)',rd(tgt.hybrid),hyb?'Top-up':'NEW']);
-  // gold (single)
+  rows.push([hyb?hyb.name:'Multi-Asset / Balanced Advantage',hyb?'Hybrid':'Hybrid (NEW)',rd(tgt.hybrid),hyb?'Top-up':'NEW','All-weather core; your steadiness anchor.']);
   const gold=keepers.find(x=>x.grp==='Metal')||(window._rows||[]).filter(x=>x.grp==='Metal'&&x.cat!=='Silver').sort((a,b)=>b.cur-a.cur)[0];
-  rows.push([gold?gold.name:'Gold ETF FoF',gold?'Gold':'Gold (NEW)',rd(tgt.gold),'Top-up']);
-  // debt
+  rows.push([gold?gold.name:'Gold ETF FoF',gold?'Gold':'Gold (NEW)',rd(tgt.gold),'Top-up',`One gold fund at ~${t.gold}% — move all metals here.`]);
   const debt=keepers.find(x=>x.grp==='Debt');
-  rows.push([debt?debt.name:'Short-term / Corporate Bond fund',debt?'Debt':'Debt (NEW)',rd(tgt.debt),debt?'Top-up':'NEW']);
+  rows.push([debt?debt.name:'Short-Term / Corporate Bond fund',debt?'Debt':'Debt (NEW)',rd(tgt.debt),debt?'Top-up':'NEW',`Stability; cushions the equity swings (~${t.debt}%).`]);
   const tagc=a=>a==='NEW'?'t-Exit':(a==='Hold'?'t-Keep':'t-Trim');
   $('growOut').innerHTML=`<div class="note" style="margin-bottom:8px">Target ₹${(total/100000).toFixed(2)}L mix: ${t.equity}% equity / ${t.hybrid}% hybrid / ${t.gold}% gold / ${t.debt}% debt. Split the ${inr(newAmt)} over the buy calendar below, don't lump it.</div>
-   <table><thead><tr><th>Fund</th><th>Type</th><th style="text-align:right">Target</th><th>Action</th></tr></thead><tbody>${
-   rows.map(r=>`<tr><td>${r[0]}</td><td style="color:var(--muted);font-size:12px">${r[1]}</td><td style="text-align:right">${inr(r[2])}</td><td><span class="tag ${tagc(r[3])}">${r[3]}</span></td></tr>`).join('')}</tbody></table>`;}
+   <table><thead><tr><th>Fund</th><th style="text-align:right">Target</th><th>Action</th><th>Why</th></tr></thead><tbody>${
+   rows.map(r=>`<tr><td><div class="fname">${r[0]}</div><div class="fsub">${r[1]}</div></td>
+     <td style="text-align:right">${inr(r[2])}</td><td><span class="tag ${tagc(r[3])}">${r[3]}</span></td>
+     <td class="why" style="max-width:150px">${r[4]}</td></tr>`).join('')}</tbody></table>`;}
 
 /* ---------- Buy calendar (input-driven) ---------- */
 function planCal(){
   const newAmt=parseFloat($('calAmt').value)||0;const months=Math.max(1,Math.min(12,parseInt($('calMonths').value)||3));
   if(newAmt<=0){$('calOut').innerHTML='<div class="note">Enter the amount and months to generate a schedule.</div>';return;}
   const p=window._p||{},t=targets(p),per=newAmt/months;
+  const keepers=(window._rows||[]).filter(x=>x.verdict==='Keep');
+  const short=n=>n.replace(/ Fund.*$/,'').split(' ').slice(0,3).join(' ');
+  const eqF=keepers.filter(x=>x.grp==='Equity').sort((a,b)=>b.cur-a.cur)[0];
+  const hyF=keepers.find(x=>x.grp==='Hybrid');
+  const goF=keepers.find(x=>x.grp==='Metal')||(window._rows||[]).filter(x=>x.grp==='Metal'&&x.cat!=='Silver').sort((a,b)=>b.cur-a.cur)[0];
+  const buyBuckets=[
+    ['Debt',t.debt,'Short-Term Debt (NEW)'],
+    ['Hybrid',t.hybrid,hyF?short(hyF.name):'Multi-Asset'],
+    ['Equity',t.equity,eqF?short(eqF.name):'Nifty 50 Index (NEW)'],
+    ['Gold',t.gold,goF?short(goF.name):'Gold ETF FoF']];
   const sells=(window._rows||[]).filter(x=>x.verdict!=='Keep').sort((a,b)=>(a.verdict==='Exit'?-1:1));
   const perMonthSell=Math.ceil(sells.length/months);
-  const buyBuckets=[['Debt',t.debt],['Hybrid',t.hybrid],['Equity',t.equity],['Gold',t.gold]];
   let rows='';const rd=n=>Math.round(n/1000)*1000;
   for(let mo=1;mo<=months;mo++){
-    const ss=sells.slice((mo-1)*perMonthSell,mo*perMonthSell).map(x=>x.name.split(' ').slice(0,3).join(' ')+' ('+x.verdict+')');
-    const buys=buyBuckets.map(([lbl,w])=>`${lbl} ${inr(rd(per*w/100))}`).join(' · ');
+    const ss=sells.slice((mo-1)*perMonthSell,mo*perMonthSell).map(x=>short(x.name)+' ('+x.verdict+')');
+    const buys=buyBuckets.map(([lbl,w,fn])=>`${fn} ${inr(rd(per*w/100))}`).join(' · ');
     rows+=`<tr><td style="vertical-align:top"><b>Month ${mo}</b></td>
       <td style="text-align:left;color:var(--red);font-size:12px">${ss.length?ss.join('<br>'):'—'}</td>
       <td style="text-align:left;color:var(--green);font-size:12px">${buys}</td></tr>`;}

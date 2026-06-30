@@ -43,6 +43,9 @@ input,select{font-size:16px;width:100%;padding:12px;border:1px solid var(--line)
 .allocbar{height:10px;border-radius:6px;overflow:hidden;display:flex;margin:6px 0 5px}
 .allocbar span{display:block;height:100%}
 .legend{font-size:12px;color:var(--muted)}
+.filterbar{display:flex;gap:7px;margin:0 2px 10px}
+.filterbar button{border:1px solid var(--line);background:#fff;border-radius:20px;padding:7px 16px;font-size:13px;color:var(--ink);min-height:40px}
+.filterbar button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 .note{font-size:12.5px;color:var(--muted);line-height:1.55}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line)}
@@ -114,14 +117,16 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
   </div>
   <div class="kpis" id="kpis"></div>
   <h2>Where your money sits</h2>
-  <div class="card"><div class="allocbar" id="allocbar"></div><div class="legend" id="alloclegend"></div>
-    <div class="chart-box" style="margin-top:8px"><canvas id="assetChart"></canvas></div></div>
-  <div class="card note" id="allocAdvice"></div>
-  <h2>Growth projection</h2>
-  <div class="card note" id="projection"></div>
+  <div class="card" style="padding:12px 14px">
+    <div class="allocbar" id="allocbar"></div><div class="legend" id="alloclegend"></div>
+    <div class="note" id="allocAdvice" style="margin-top:8px"></div></div>
   <h2>Value &amp; projection over time</h2>
-  <div class="card"><div class="chart-box"><canvas id="trendChart"></canvas></div></div>
+  <div class="card" style="padding:10px 12px"><div class="chart-box" style="height:130px"><canvas id="trendChart"></canvas></div>
+    <div class="note" id="projection" style="margin-top:6px"></div></div>
   <h2>Fund-by-fund</h2>
+  <div class="filterbar" id="holdFilters">
+    <button data-f="all" class="on">All</button><button data-f="Keep">Keep</button>
+    <button data-f="Trim">Trim</button><button data-f="Exit">Exit</button></div>
   <div class="card" id="holdList"></div>
   <h2>🎯 Plan to grow</h2>
   <div class="card">
