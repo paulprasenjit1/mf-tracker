@@ -1,5 +1,5 @@
 /* MF Tracker — on-device, private. All data stays in this browser. */
-const APP_VERSION='1.2 · build 18';
+const APP_VERSION='1.3 · build 19';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -236,7 +236,7 @@ async function refresh(force){
   const navs=LS.g('navs',{}),dates=LS.g('navDates',{});
   // Battery/data saver: reuse NAVs if fetched < 30 min ago (unless the user taps Refresh).
   const fresh=(Date.now()-(LS.g('navTs',0))<30*60*1000)&&holds.every(h=>navs[h.code]);
-  if(!force&&fresh){renderDash(holds,navs,dates,holds.length);return;}
+  if(!force&&fresh){renderDash(holds,navs,dates,-1);return;}  // -1 = served from cache
   $('status').textContent='Refreshing live NAVs…';let live=0;
   await Promise.all(holds.map(async h=>{const x=await getNav(h.code);if(x){navs[h.code]=x.nav;dates[h.code]=x.date;live++;}}));
   LS.s('navs',navs);LS.s('navDates',dates);LS.s('navTs',Date.now());
@@ -256,7 +256,15 @@ function renderDash(holds,navs,dates,live){
     ['Gold / silver',(metal/(tc||1)*100).toFixed(0)+'%','target ~10%','neg']
   ].map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="v ${k[3]}">${k[1]}</div><div class="l ${k[3]}">${k[2]}</div></div>`).join('');
   const now=new Date();
-  $('status').innerHTML=live>0?'✓ Updated '+now.toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+' · '+live+'/'+holds.length+' live':'⚠ Offline — last saved values';
+  const syncedAt=LS.g('navTs',0);
+  const syncTxt=syncedAt?new Date(syncedAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
+  const ageMin=syncedAt?Math.floor((Date.now()-syncedAt)/60000):0;
+  const ageTxt=ageMin<1?'just now':(ageMin<60?ageMin+' min ago':Math.round(ageMin/60)+' hr ago');
+  $('status').innerHTML = live<0
+    ? `⏱ Synced ${syncTxt} (${ageTxt}, cached) · tap ↻ for live`
+    : live>0
+      ? `✓ Live · synced ${syncTxt} · ${live}/${holds.length} funds`
+      : `⚠ Offline · last synced ${syncTxt}`;
   const g=f=>rows.filter(f).reduce((a,b)=>a+b.cur,0);
   const eq=g(r=>r.grp==='Equity'),hy=g(r=>r.grp==='Hybrid'),go=metal,de=g(r=>r.grp==='Debt');
   const segs=[[eq,'#1457d6','Equity'],[hy,'#0f9d58','Hybrid'],[go,'#c77700','Gold/Silver'],[de,'#888780','Debt']].filter(s=>s[0]>0);
