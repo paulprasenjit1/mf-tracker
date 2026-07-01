@@ -1,4 +1,5 @@
 /* MF Tracker — on-device, private. All data stays in this browser. */
+const APP_VERSION='1.2 · build 18';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -125,10 +126,15 @@ function backDash(){if(LS.g('holdings',[]).length)refresh();}
 function busy(on,t,sub){$('busy').style.display=on?'flex':'none';if(t)$('busytxt').textContent=t;$('busysub').textContent=sub||'';}
 
 /* ---------- OCR + parse (reads Invested + Current Value; units derived from live NAV) ---------- */
+function ensureTesseract(){return new Promise((res,rej)=>{if(window.Tesseract)return res();
+  const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+  s.onload=()=>res();s.onerror=()=>rej(new Error('Could not load the OCR engine — check your connection.'));document.head.appendChild(s);});}
 async function onBuild(){
   ensureProfile();
   const files=$('shots').files;
   if(!files.length){alert('Add at least one screenshot first.');return;}
+  busy(true,'Loading reader…','First scan loads the OCR engine (one-time).');
+  try{await ensureTesseract();}catch(e){busy(false);alert(e.message);return;}
   busy(true,'Reading screenshots…','Runs on your phone — can take a moment.');
   let text='';
   for(let i=0;i<files.length;i++){$('busysub').textContent=`Image ${i+1} of ${files.length}…`;
@@ -215,7 +221,7 @@ async function saveHoldings(){
     let inv=r.inv||0,cur=r.cur||0,units=nav>0?(cur||inv)/nav:0;
     if(REF[code]){inv=REF[code].inv;units=REF[code].units;cur=nav>0?units*nav:cur;}  // recognised fund: use verified holdings
     holds.push({key:code+Math.random().toString(36).slice(2,5),name:r.name.trim(),code,cat,grp,units,inv,cur});}
-  LS.s('navs',navs);LS.s('navDates',dates);
+  LS.s('navs',navs);LS.s('navDates',dates);LS.s('navTs',Date.now());
   busy(false);
   if(!holds.length){alert('Could not match any fund. Edit names closer to how NJ shows them.');return;}
   LS.s('holdings',holds);
@@ -224,12 +230,16 @@ async function saveHoldings(){
   refresh();}
 
 /* ---------- live refresh ---------- */
-async function refresh(){
+async function refresh(force){
   const holds=LS.g('holdings',[]);if(!holds.length){show('setup');return;}
-  show('dash');$('status').textContent='Refreshing live NAVs…';
-  const navs=LS.g('navs',{}),dates=LS.g('navDates',{});let live=0;
+  show('dash');
+  const navs=LS.g('navs',{}),dates=LS.g('navDates',{});
+  // Battery/data saver: reuse NAVs if fetched < 30 min ago (unless the user taps Refresh).
+  const fresh=(Date.now()-(LS.g('navTs',0))<30*60*1000)&&holds.every(h=>navs[h.code]);
+  if(!force&&fresh){renderDash(holds,navs,dates,holds.length);return;}
+  $('status').textContent='Refreshing live NAVs…';let live=0;
   await Promise.all(holds.map(async h=>{const x=await getNav(h.code);if(x){navs[h.code]=x.nav;dates[h.code]=x.date;live++;}}));
-  LS.s('navs',navs);LS.s('navDates',dates);
+  LS.s('navs',navs);LS.s('navDates',dates);LS.s('navTs',Date.now());
   renderDash(holds,navs,dates,live);}
 
 function renderDash(holds,navs,dates,live){
@@ -286,7 +296,7 @@ function renderDash(holds,navs,dates,live){
     {label:'Invested',data:hist.map(()=>ti).concat(new Array(yrs).fill(ti)),borderColor:'#c4cbd6',borderDash:[3,4],pointRadius:0,borderWidth:1,order:3}]},
     options:{plugins:{legend:{position:'bottom',labels:{boxWidth:14,font:{size:11},usePointStyle:true}},
       tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.parsed.y!=null?inr(c.parsed.y):'—')}}},
-      responsive:true,maintainAspectRatio:false,
+      responsive:true,maintainAspectRatio:false,animation:false,
       scales:{x:{grid:{display:false},ticks:{font:{size:10},maxRotation:0,autoSkip:true,maxTicksLimit:6}},
         y:{grid:{color:'#eef1f6'},ticks:{font:{size:10},callback:v=>'₹'+(v/100000).toFixed(1)+'L'}}}}});
   $('projection').innerHTML=`<b>Today ${inr(tc)}</b> → in ${yrs} yrs about <b style="color:var(--green)">${inr(fvEnd)}</b> at ~${(r*100).toFixed(1)}%/yr (illustrative, no fresh money). The grey line is what you invested (${inr(ti)}); blue is where you are; green is the projected path. A 12%/yr path would reach ~${inr(fv12)} but needs a more equity-heavy, more volatile mix.`;
@@ -563,7 +573,7 @@ function reupload(){show('setup');loadProfileForm();$('shots').value='';$('shotc
 function editProfile(){show('setup');loadProfileForm();}
 function resetApp(){
   if(!confirm('Clear ALL saved data (profile, holdings, history, signals) and start fresh? This cannot be undone.'))return;
-  ['holdings','navs','navDates','history','profile','signals','news'].forEach(k=>localStorage.removeItem(k));
+  ['holdings','navs','navDates','navTs','history','profile','signals','news'].forEach(k=>localStorage.removeItem(k));
   location.reload();}
 
 document.querySelectorAll('.chips').forEach(grp=>grp.addEventListener('click',e=>{
@@ -572,4 +582,5 @@ document.querySelectorAll('.chips').forEach(grp=>grp.addEventListener('click',e=
 $('shots').addEventListener('change',()=>{const n=$('shots').files.length;$('shotcount').textContent=n?n+' image(s) selected':'';});
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
-(function init(){const holds=LS.g('holdings',[]);if(holds.length)refresh();else{loadProfileForm();show('setup');}})();
+(function init(){const v=$('ver');if(v)v.textContent='v'+APP_VERSION;
+  const holds=LS.g('holdings',[]);if(holds.length)refresh();else{loadProfileForm();show('setup');}})();

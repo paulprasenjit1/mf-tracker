@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="MF Tracker">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<!-- OCR engine (tesseract) is loaded on demand only when you upload screenshots, to save memory/battery -->
 <style>
 :root{--card:#fff;--ink:#13213f;--muted:#667089;--green:#0f9d58;--greenbg:#e7f6ee;
 --red:#d23f3f;--redbg:#fbeaea;--amber:#c77700;--amberbg:#fdf2e2;--blue:#1457d6;--line:#e6e9f0;--page:#f4f6fb}
@@ -67,7 +67,7 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
 <div id="busy"><div class="spin"></div><div id="busytxt" style="font-size:14px;color:var(--ink)">Reading…</div><div id="busysub" class="small" style="margin-top:6px"></div></div>
 
 <div class="wrap">
-<header class="top"><h1>MF Tracker</h1><p>Your private, on-device fund tracker</p></header>
+<header class="top"><h1>MF Tracker</h1><p>Your private, on-device fund tracker · <span id="ver" style="opacity:.85"></span></p></header>
 
 <div id="setup" class="hide">
   <button id="backSetup" class="btn-ghost hide" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px;margin-bottom:10px" onclick="backDash()">‹ Back to dashboard</button>
@@ -117,7 +117,7 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
   <div class="card" style="padding:11px 14px">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <span id="status" class="small">Loading…</span>
-      <button class="btn-ghost" style="width:auto;padding:7px 14px;font-size:12px;border-radius:20px" onclick="refresh()">↻ Refresh</button></div>
+      <button class="btn-ghost" style="width:auto;padding:7px 14px;font-size:12px;border-radius:20px" onclick="refresh(true)">↻ Refresh</button></div>
   </div>
   <div class="kpis" id="kpis"></div>
   <h2>Where your money sits</h2>
@@ -182,7 +182,7 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
 </div>
 
 <div class="bottombar hide" id="bar">
-  <button onclick="refresh()">↻<br>NAVs</button>
+  <button onclick="refresh(true)">↻<br>NAVs</button>
   <button onclick="reupload()">📷<br>Update</button>
   <button onclick="editProfile()">⚙<br>Profile</button>
 </div>
