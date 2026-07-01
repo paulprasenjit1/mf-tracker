@@ -142,9 +142,16 @@ function parsePortfolio(text){
   const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);const out=[];
   const isName=l=>/[A-Za-z]{4,}/.test(l)&&/(fund|etf|flexi|index|nifty|psu|multi[- ]?asset|bond|gilt|debt)/i.test(l)&&!/^(inv\.|inv\s+amt|cur\.|bal\s*units|abs\.|unr\.|as on|scheme|investor|net asset)/i.test(l);
   for(let i=0;i<lines.length;i++){if(!isName(lines[i]))continue;
-    let name=lines[i].replace(/\s*[-–]\s*(regular\s*)?gr\b.*$/i,'').replace(/[↗➔→»]+/g,'').replace(/\s{2,}/g,' ').trim();
+    // NJ fund title: "<Name> - Gr ↗" or "<Name> - Regular Gr ↗". Strip plan suffix, arrows, leading junk.
+    let name=lines[i]
+      .replace(/\s*[-–—]\s*(regular|direct)?\s*(plan)?\s*(gr(owth)?)\b.*$/i,'')
+      .replace(/\s*[-–—]\s*(idcw|dividend|payout|reinvest).*$/i,'')
+      .replace(/[↗➔→»➜↑]+/g,'').replace(/^[^A-Za-z]+/,'').replace(/\s{2,}/g,' ').trim();
     if(name.length<6)continue;
-    const blk=lines.slice(i,i+9).join(' ').replace(/-?\d[\d,]*\.\d+\s*%/g,' ');
+    // Limit this card's block to end before the NEXT fund title, so amounts don't bleed across cards.
+    let end=Math.min(lines.length,i+9);
+    for(let j=i+1;j<end;j++){if(isName(lines[j])){end=j;break;}}
+    const blk=lines.slice(i,end).join(' ').replace(/-?\d[\d,]*\.\d+\s*%/g,' ');
     const signed=(blk.match(/-?\d[\d,]*\.\d{2}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
     const pos=signed.filter(x=>x>0);
     const units=(blk.match(/\d[\d,]*\.\d{3}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
@@ -267,14 +274,22 @@ function renderDash(holds,navs,dates,live){
   const labels=hist.map(x=>{const q=x.date.split('-');return q[2]+' '+m[+q[1]-1];});
   const projLabels=[];for(let yy=1;yy<=yrs;yy++)projLabels.push('+'+yy+'y');
   const allLabels=labels.concat(projLabels);
+  // Actual value line: real history + a bold "today" point. Projection: a light green area growing forward from today.
   const valData=hist.map(x=>x.cur).concat(new Array(yrs).fill(null));
+  const ptR=hist.map((_,i)=>i===hist.length-1?5:2).concat(new Array(yrs).fill(0));
   const projData=new Array(hist.length-1).fill(null).concat([tc]).concat(Array.from({length:yrs},(_,i)=>Math.round(tc*Math.pow(1+r,i+1))));
+  const fvEnd=projData[projData.length-1];
   if(trendChart)trendChart.destroy();
   trendChart=new Chart($('trendChart'),{type:'line',data:{labels:allLabels,datasets:[
-    {label:'Value',data:valData,borderColor:'#1457d6',backgroundColor:'rgba(20,87,214,.08)',fill:true,tension:.25,pointRadius:2},
-    {label:'Projected',data:projData,borderColor:'#0f9d58',borderDash:[4,4],pointRadius:0},
-    {label:'Invested',data:hist.map(()=>ti).concat(new Array(yrs).fill(null)),borderColor:'#9aa3b5',borderDash:[5,4],pointRadius:0}]},
-    options:{plugins:{legend:{position:'bottom'}},responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>'₹'+(v/100000).toFixed(1)+'L'}}}}});
+    {label:'Projected',data:projData,borderColor:'#0f9d58',backgroundColor:'rgba(15,157,88,.08)',borderDash:[5,4],pointRadius:(c)=>c.dataIndex===projData.length-1?4:0,pointBackgroundColor:'#0f9d58',fill:true,tension:.3,order:2},
+    {label:'Your value',data:valData,borderColor:'#1457d6',backgroundColor:'rgba(20,87,214,.10)',fill:true,tension:.25,pointRadius:ptR,pointBackgroundColor:'#1457d6',borderWidth:2,order:1},
+    {label:'Invested',data:hist.map(()=>ti).concat(new Array(yrs).fill(ti)),borderColor:'#c4cbd6',borderDash:[3,4],pointRadius:0,borderWidth:1,order:3}]},
+    options:{plugins:{legend:{position:'bottom',labels:{boxWidth:14,font:{size:11},usePointStyle:true}},
+      tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.parsed.y!=null?inr(c.parsed.y):'—')}}},
+      responsive:true,maintainAspectRatio:false,
+      scales:{x:{grid:{display:false},ticks:{font:{size:10},maxRotation:0,autoSkip:true,maxTicksLimit:6}},
+        y:{grid:{color:'#eef1f6'},ticks:{font:{size:10},callback:v=>'₹'+(v/100000).toFixed(1)+'L'}}}}});
+  $('projection').innerHTML=`<b>Today ${inr(tc)}</b> → in ${yrs} yrs about <b style="color:var(--green)">${inr(fvEnd)}</b> at ~${(r*100).toFixed(1)}%/yr (illustrative, no fresh money). The grey line is what you invested (${inr(ti)}); blue is where you are; green is the projected path. A 12%/yr path would reach ~${inr(fv12)} but needs a more equity-heavy, more volatile mix.`;
   // refresh dynamic sections if amounts already entered
   if($('growAmt').value)planGrow();
   if($('calAmt').value)planCal();
@@ -287,6 +302,13 @@ function computeInsights(rows,p,tc,t){
   const eq=grp(r=>r.grp==='Equity'),metal=grp(r=>r.grp==='Metal'),de=grp(r=>r.grp==='Debt'),hy=grp(r=>r.grp==='Hybrid');
   const ex=rows.filter(r=>r.verdict==='Exit').length,tr=rows.filter(r=>r.verdict==='Trim').length;
   if(ex+tr)ins.push(`<b>${ex} to exit, ${tr} to trim</b> — see the tags above. Spread the sells over a few weeks rather than one day.`);
+  // Market / index read from your latest news signals
+  const sg=getSignals();
+  if(sg){const mk=sg.items.market||sg.items.nifty||sg.items.sensex;
+    if(mk)ins.push(`<b>Market read:</b> ${mk.note} — ${mk.bias>0?'a reasonable window to add on your SIP dates':mk.bias<0?'be patient; deploy gradually, keep some dry powder':'no strong directional edge; keep staggering'}.`);
+    const tilts=Object.entries(sg.items).filter(([k])=>['smallcap','midcap','largecap','flexi','gold','silver','thematic','global'].includes(k)&&['smallcapindex','midcapindex'].indexOf(k)<0);
+    const up=tilts.filter(([,v])=>v.bias>0).map(([k])=>k),dn=tilts.filter(([,v])=>v.bias<0).map(([k])=>k);
+    if(up.length||dn.length)ins.push(`<b>News tilt applied:</b> ${up.length?'favourable — '+up.join(', '):''}${up.length&&dn.length?'; ':''}${dn.length?'cautious — '+dn.join(', '):''}. Verdicts above reflect these (one notch).`);}
   if(pct(metal)>t.gold+5)ins.push(`<b>Gold/silver is ${pct(metal).toFixed(0)}%</b> vs a ~${t.gold}% target. Silver is ${CTX.silver} — trim metals into strength, keep one gold fund.`);
   const sm=grp(r=>r.cat==='Small Cap'||r.cat==='Mid Cap'),cap={cautious:15,nervous:22,calm:30}[p.risk]||22;
   if(pct(sm)>cap)ins.push(`<b>Small + mid cap is ${pct(sm).toFixed(0)}%</b> of equity-heavy risk — on the high side for "${p.risk}" (~${cap}% suits you). Keep your winners, don't add more.`);
@@ -306,7 +328,7 @@ function computeInsights(rows,p,tc,t){
   return ins;}
 
 /* ---------- News-aware signals (AI-assisted, free; copy prompt → run in AI → paste back) ---------- */
-const SIG_KEYS=['silver','gold','smallcap','midcap','largecap','flexi','thematic','global','hybrid','debt','equity','metals'];
+const SIG_KEYS=['silver','gold','smallcap','midcap','largecap','flexi','thematic','global','hybrid','debt','equity','metals','market','nifty','sensex','banknifty','midcapindex','smallcapindex'];
 function getSignals(){const s=LS.g('signals',null);if(!s)return null;if(Date.now()-s.t>14*864e5)return null;return s;}
 function sigKeyFor(h){
   const m={'Silver':'silver','Gold':'gold','Gold+Silver':'gold','Small Cap':'smallcap','Mid Cap':'midcap','Large Cap':'largecap','Large & Mid':'largecap','Flexi Cap':'flexi','Thematic':'thematic','Global':'global'}[h.cat];
@@ -318,16 +340,18 @@ function copySignalPrompt(){
   const rows=window._hrows||LS.g('holdings',[]);
   const cats=[...new Set(rows.map(r=>r.cat).filter(Boolean))];
   const present=[...new Set(rows.flatMap(r=>sigKeyFor(r)))];
-  const prompt=`You are an investment strategist. Using TODAY'S market and geopolitical news relevant to Indian mutual fund investors, give a SHORT-TERM bias for each asset bucket below.
+  const prompt=`You are a market strategist. Using TODAY'S Indian market news, INDEX TECHNICALS (Nifty 50, Sensex, Nifty Midcap/Smallcap, Bank Nifty — trend, support/resistance, momentum) and global/geopolitical cues, give a SHORT-TERM bias for each bucket below AND an overall market-timing read (is today a reasonable time to invest, wait, or redeem).
 
-My buckets: ${present.join(', ')}.
+My asset buckets: ${present.join(', ')}.
 (My fund categories: ${cats.join(', ')}.)
 
-Reply with ONLY this block, one line per bucket, no other text:
+Reply with ONLY this block, one line per bucket, nothing else:
 SIGNALS:
-<bucket>=<-1|0|+1> | <reason in <=8 words citing the news>
+market=<-1|0|+1> | <overall timing: invest / wait / redeem, in <=10 words with a technical reason>
+nifty=<-1|0|+1> | <Nifty trend/technical in <=8 words>
+<bucket>=<-1|0|+1> | <reason in <=8 words citing news or technicals>
 
-Rules: +1 = bullish (favor holding/adding), 0 = neutral, -1 = bearish (favor trimming). Allowed buckets: ${SIG_KEYS.join(', ')}. Only include buckets you have a clear, news-backed view on.`;
+Rules: +1 = bullish (favour holding/adding), 0 = neutral, -1 = bearish (favour trimming/waiting). Always include a "market=" line for overall timing. Allowed buckets: ${SIG_KEYS.join(', ')}. Only include buckets you have a clear, evidence-backed view on.`;
   const done=()=>{$('sigMsg').innerHTML='<span style="color:var(--green)">✓ Prompt copied. Run it in your AI app, copy its SIGNALS block, then tap "Paste result".</span>';};
   if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(prompt).then(done).catch(()=>{$('sigInput').value=prompt;toggleSignalPaste(true);});
   else{$('sigMsg').textContent='Copy not supported — long-press to copy from the paste box.';}}
@@ -353,9 +377,10 @@ function updateSigStatus(){
 
 /* ---------- Market & MF news (free public RSS via CORS proxy; best-effort) ---------- */
 const NEWS_FEEDS=[
-  ['Economic Times','https://economictimes.indiatimes.com/mutual-funds/rssfeeds/360793467.cms'],
-  ['Livemint','https://www.livemint.com/rss/money'],
-  ['Moneycontrol','https://www.moneycontrol.com/rss/mutualfunds.xml'],
+  ['ET Markets','https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms'],
+  ['Moneycontrol Markets','https://www.moneycontrol.com/rss/marketreports.xml'],
+  ['Livemint Markets','https://www.livemint.com/rss/markets'],
+  ['ET Mutual Funds','https://economictimes.indiatimes.com/mutual-funds/rssfeeds/360793467.cms'],
   ['Business Standard','https://www.business-standard.com/rss/markets-106.rss']];
 const PROXIES=[u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),
                u=>'https://corsproxy.io/?url='+encodeURIComponent(u)];
@@ -385,10 +410,16 @@ async function loadNews(force){
   const seen={},uniq=[];all.forEach(i=>{const k=(i.title||'').slice(0,40);if(i.title&&!seen[k]){seen[k]=1;uniq.push(i);}});
   if(uniq.length){LS.s('news',{t:Date.now(),items:uniq.slice(0,8)});renderNews(uniq.slice(0,8));}
   else renderNews(null);}
+function timingBanner(){
+  const s=getSignals();const mk=s&&(s.items.market||s.items.nifty);
+  if(!mk)return `<div class="note" style="background:#eef4ff;border:1px solid #d4e2fb;border-radius:8px;padding:8px 10px;margin-bottom:10px">⏱ <b>Timing:</b> run <b>News-aware signals</b> above to get a live "invest / wait / redeem" read from index technicals.</div>`;
+  const col=mk.bias>0?'var(--green)':(mk.bias<0?'var(--red)':'var(--amber)');
+  const verb=mk.bias>0?'Reasonable time to invest':mk.bias<0?'Caution — consider waiting / staggering':'Neutral — stick to your plan';
+  return `<div class="note" style="background:#f4f6fb;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:10px">⏱ <b style="color:${col}">${verb}.</b> ${mk.note}</div>`;}
 function renderNews(items){
-  if(!items||!items.length){$('news').innerHTML='<div class="note">Couldn\'t load live headlines right now (the free news source may be busy).</div>'+NEWS_LINKS;return;}
+  if(!items||!items.length){$('news').innerHTML=timingBanner()+'<div class="note">Couldn\'t load live headlines right now (the free news source may be busy).</div>'+NEWS_LINKS;return;}
   const fmt=d=>{try{const x=new Date(d);return x.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});}catch(e){return '';}};
-  $('news').innerHTML=items.map(i=>`<div class="row" style="padding:9px 0">
+  $('news').innerHTML=timingBanner()+items.map(i=>`<div class="row" style="padding:9px 0">
     <a href="${i.link}" target="_blank" rel="noopener" style="flex:1;color:var(--ink);text-decoration:none">
       <div class="fname" style="font-weight:400">${i.title}</div>
       <div class="fsub">${i.src||''}${i.date?' · '+fmt(i.date):''}</div></a>
@@ -411,58 +442,67 @@ document.querySelectorAll('#holdFilters button').forEach(b=>b.onclick=()=>{HOLDF
 /* ---------- Plan to grow (input-driven) ---------- */
 function bucketTotals(){const r=window._rows||[];const g=f=>r.filter(f).reduce((a,b)=>a+b.cur,0);
   return{equity:g(x=>x.grp==='Equity'),hybrid:g(x=>x.grp==='Hybrid'),gold:g(x=>x.grp==='Metal'),debt:g(x=>x.grp==='Debt'),total:window._tot||0};}
-function planGrow(){
-  const newAmt=parseFloat($('growAmt').value)||0;const p=window._p||LS.g('profile',{});
-  if(newAmt<=0){$('growOut').innerHTML='<div class="note">Enter an amount to see the plan.</div>';return;}
-  const t=targets(p),b=bucketTotals(),total=b.total+newAmt;
-  const tgt={equity:total*t.equity/100,hybrid:total*t.hybrid/100,gold:total*t.gold/100,debt:total*t.debt/100};
-  const rd=n=>Math.max(0,Math.round(n/1000)*1000);
+/* Build the ranked list of investment destinations by how far each bucket is BELOW target,
+   tilted by any news signals. Used by both Plan-to-grow and Buy calendar. */
+function growCandidates(newAmt){
+  const p=window._p||LS.g('profile',{}),t=targets(p),b=bucketTotals(),total=b.total+newAmt;
+  const sig=getSignals();const bias=m=>{const it=sig&&(sig.items[m]||(m==='gold'&&sig.items.metals));return it?it.bias:0;};
   const keepers=(window._rows||[]).filter(x=>x.verdict==='Keep');
-  const rows=[];
-  const eqKeep=keepers.filter(x=>x.grp==='Equity');const eqCur=eqKeep.reduce((a,b)=>a+b.cur,0)||1;
-  const idxAmt=rd(tgt.equity*0.20),gloAmt=rd(tgt.equity*0.08),restEq=tgt.equity-idxAmt-gloAmt;
-  eqKeep.forEach(f=>rows.push([f.name,f.cat,rd(restEq*f.cur/eqCur),'Top-up',`Quality ${f.cat.toLowerCase()} you already hold.`]));
-  if(!(window._rows||[]).some(x=>/index|nifty/i.test(x.name)))rows.push(['Nifty 50 Index Fund','Large-cap index',idxAmt,'NEW','Low-cost core; less reliance on any one manager.']);
-  if(!(window._rows||[]).some(x=>x.cat==='Global'))rows.push(['Global / Nasdaq 100 FoF','Global equity',gloAmt,'NEW',`Adds global exposure you don't have today (~${Math.round(gloAmt/total*100)}%).`]);
-  const hyb=keepers.find(x=>x.grp==='Hybrid');
-  rows.push([hyb?hyb.name:'Multi-Asset / Balanced Advantage',hyb?'Hybrid':'Hybrid (NEW)',rd(tgt.hybrid),hyb?'Top-up':'NEW','All-weather core; your steadiness anchor.']);
-  const gold=keepers.find(x=>x.grp==='Metal')||(window._rows||[]).filter(x=>x.grp==='Metal'&&x.cat!=='Silver').sort((a,b)=>b.cur-a.cur)[0];
-  rows.push([gold?gold.name:'Gold ETF FoF',gold?'Gold':'Gold (NEW)',rd(tgt.gold),'Top-up',`One gold fund at ~${t.gold}% — move all metals here.`]);
-  const debt=keepers.find(x=>x.grp==='Debt');
-  rows.push([debt?debt.name:'Short-Term / Corporate Bond fund',debt?'Debt':'Debt (NEW)',rd(tgt.debt),debt?'Top-up':'NEW',`Stability; cushions the equity swings (~${t.debt}%).`]);
-  const tagc=a=>a==='NEW'?'t-Exit':(a==='Hold'?'t-Keep':'t-Trim');
-  $('growOut').innerHTML=`<div class="note" style="margin-bottom:8px">Target ₹${(total/100000).toFixed(2)}L mix: ${t.equity}% equity / ${t.hybrid}% hybrid / ${t.gold}% gold / ${t.debt}% debt. Split the ${inr(newAmt)} over the buy calendar below, don't lump it.</div>
-   <table><thead><tr><th>Fund</th><th style="text-align:right">Target</th><th>Action</th><th>Why</th></tr></thead><tbody>${
-   rows.map(r=>`<tr><td><div class="fname">${r[0]}</div><div class="fsub">${r[1]}</div></td>
-     <td style="text-align:right">${inr(r[2])}</td><td><span class="tag ${tagc(r[3])}">${r[3]}</span></td>
-     <td class="why" style="max-width:150px">${r[4]}</td></tr>`).join('')}</tbody></table>`;}
+  const rows=window._rows||[];
+  const gap={equity:Math.max(0,total*t.equity/100-b.equity),hybrid:Math.max(0,total*t.hybrid/100-b.hybrid),
+             gold:Math.max(0,total*t.gold/100-b.gold),debt:Math.max(0,total*t.debt/100-b.debt)};
+  const c=[];
+  if(gap.debt>0){const f=keepers.find(x=>x.grp==='Debt');c.push({name:f?f.name:'Short-Term / Corporate Bond fund',type:'Debt',bucket:'debt',w:gap.debt*(1+0.3*bias('debt')),action:f?'Top-up':'NEW',why:'Stability leg; cushions equity dips.'});}
+  if(gap.hybrid>0){const f=keepers.find(x=>x.grp==='Hybrid');c.push({name:f?f.name:'Multi-Asset / Balanced Advantage',type:'Hybrid',bucket:'hybrid',w:gap.hybrid*(1+0.3*bias('hybrid')),action:f?'Top-up':'NEW',why:'All-weather core; steadiness.'});}
+  if(gap.equity>0){
+    const eqKeep=keepers.filter(x=>x.grp==='Equity').sort((a,b)=>b.cur-a.cur);
+    const hasIdx=rows.some(x=>/index|nifty|sensex/i.test(x.name)),hasGlo=rows.some(x=>x.cat==='Global');
+    const eqTilt=1+0.3*bias('equity');
+    if(!hasIdx)c.push({name:'Nifty 50 Index Fund',type:'Large-cap index',bucket:'equity',w:gap.equity*0.35*eqTilt,action:'NEW',why:'Low-cost, steady core.'});
+    if(!hasGlo)c.push({name:'Global / Nasdaq 100 FoF',type:'Global equity',bucket:'equity',w:gap.equity*0.18*eqTilt,action:'NEW',why:'Diversification you lack.'});
+    eqKeep.slice(0,2).forEach((f,i)=>c.push({name:f.name,type:f.cat,bucket:'equity',w:gap.equity*(i?0.20:0.35)*eqTilt,action:'Top-up',why:`Quality ${f.cat.toLowerCase()} you hold.`}));
+  }
+  if(gap.gold>0){const f=keepers.find(x=>x.grp==='Metal')||rows.filter(x=>x.grp==='Metal'&&x.cat!=='Silver').sort((a,b)=>b.cur-a.cur)[0];
+    c.push({name:f?f.name:'Gold ETF FoF',type:'Gold',bucket:'gold',w:gap.gold*(1+0.3*bias('gold')),action:f?'Top-up':'NEW',why:'Hedge to ~target weight.'});}
+  return {cands:c.filter(x=>x.w>0).sort((a,b)=>b.w-a.w),t,total,sig};}
 
-/* ---------- Buy calendar (input-driven) ---------- */
+function planGrow(){
+  const newAmt=parseFloat($('growAmt').value)||0;
+  if(newAmt<=0){$('growOut').innerHTML='<div class="note">Enter an amount to see the plan.</div>';return;}
+  const {cands,t,total,sig}=growCandidates(newAmt);
+  if(!cands.length){$('growOut').innerHTML='<div class="note">Your allocation is already near target — top up your steadiest core (hybrid or a large-cap/index fund), or simply hold.</div>';return;}
+  // Number of funds scales with the amount: tiny amount → 1 fund; large → up to all gaps.
+  const N=Math.max(1,Math.min(cands.length,Math.round(newAmt/25000)||1));
+  const chosen=cands.slice(0,N);
+  const ws=chosen.reduce((a,b)=>a+b.w,0)||1;
+  const rd=n=>Math.max(500,Math.round(n/500)*500);
+  chosen.forEach(c=>{c.amt=rd(newAmt*c.w/ws);});
+  const s=chosen.reduce((a,b)=>a+b.amt,0);chosen[0].amt+=Math.round(newAmt-s);  // absorb rounding
+  chosen.forEach(c=>c.pct=Math.round(c.amt/newAmt*100));
+  const tagc=a=>a==='NEW'?'t-Exit':'t-Trim';
+  $('growOut').innerHTML=`<div class="note" style="margin-bottom:8px">Deploying <b>${inr(newAmt)}</b> across <b>${chosen.length} ${chosen.length>1?'funds':'fund'}</b> — fewer for a small amount, more as it grows — weighted to your biggest gaps vs a ${t.equity}/${t.hybrid}/${t.gold}/${t.debt} target${sig?', tilted by your news signals':''}.</div>
+   <table><thead><tr><th>Put into</th><th style="text-align:right">Amount</th><th style="text-align:right">%</th><th>Why</th></tr></thead><tbody>${
+   chosen.map(c=>`<tr><td><div class="fname">${c.name} <span class="tag ${tagc(c.action)}" style="font-size:9px;padding:1px 6px">${c.action}</span></div><div class="fsub">${c.type}</div></td>
+     <td style="text-align:right">${inr(c.amt)}</td><td style="text-align:right">${c.pct}%</td><td class="why" style="max-width:120px">${c.why}</td></tr>`).join('')}</tbody></table>`;}
+
+/* ---------- Buy calendar: category + % + ₹ per month, no sell column ---------- */
 function planCal(){
   const newAmt=parseFloat($('calAmt').value)||0;const months=Math.max(1,Math.min(12,parseInt($('calMonths').value)||3));
   if(newAmt<=0){$('calOut').innerHTML='<div class="note">Enter the amount and months to generate a schedule.</div>';return;}
-  const p=window._p||{},t=targets(p),per=newAmt/months;
-  const keepers=(window._rows||[]).filter(x=>x.verdict==='Keep');
-  const short=n=>n.replace(/ Fund.*$/,'').split(' ').slice(0,3).join(' ');
-  const eqF=keepers.filter(x=>x.grp==='Equity').sort((a,b)=>b.cur-a.cur)[0];
-  const hyF=keepers.find(x=>x.grp==='Hybrid');
-  const goF=keepers.find(x=>x.grp==='Metal')||(window._rows||[]).filter(x=>x.grp==='Metal'&&x.cat!=='Silver').sort((a,b)=>b.cur-a.cur)[0];
-  const buyBuckets=[
-    ['Debt',t.debt,'Short-Term Debt (NEW)'],
-    ['Hybrid',t.hybrid,hyF?short(hyF.name):'Multi-Asset'],
-    ['Equity',t.equity,eqF?short(eqF.name):'Nifty 50 Index (NEW)'],
-    ['Gold',t.gold,goF?short(goF.name):'Gold ETF FoF']];
-  const sells=(window._rows||[]).filter(x=>x.verdict!=='Keep').sort((a,b)=>(a.verdict==='Exit'?-1:1));
-  const perMonthSell=Math.ceil(sells.length/months);
-  let rows='';const rd=n=>Math.round(n/1000)*1000;
-  for(let mo=1;mo<=months;mo++){
-    const ss=sells.slice((mo-1)*perMonthSell,mo*perMonthSell).map(x=>short(x.name)+' ('+x.verdict+')');
-    const buys=buyBuckets.map(([lbl,w,fn])=>`${fn} ${inr(rd(per*w/100))}`).join(' · ');
-    rows+=`<tr><td style="vertical-align:top"><b>Month ${mo}</b></td>
-      <td style="text-align:left;color:var(--red);font-size:12px">${ss.length?ss.join('<br>'):'—'}</td>
-      <td style="text-align:left;color:var(--green);font-size:12px">${buys}</td></tr>`;}
-  $('calOut').innerHTML=`<div class="note" style="margin-bottom:8px">${inr(newAmt)} over ${months} month(s) = ${inr(per)}/month. Pick a fixed date; sell &amp; buy the same day.</div>
-   <table><thead><tr><th>When</th><th style="text-align:left">Sell</th><th style="text-align:left">Buy (by bucket)</th></tr></thead><tbody>${rows}</tbody></table>`;}
+  const {cands,sig}=growCandidates(newAmt);
+  // roll candidate weights up to category level
+  const catW={};cands.forEach(c=>{const lbl={equity:'Equity (index + core)',hybrid:'Hybrid',gold:'Gold',debt:'Debt'}[c.bucket];catW[lbl]=(catW[lbl]||0)+c.w;});
+  let cats=Object.entries(catW).map(([c,w])=>({c,w}));
+  if(!cats.length)cats=[{c:'Hybrid / large-cap core',w:1}];
+  const ws=cats.reduce((a,x)=>a+x.w,0)||1;cats.forEach(x=>x.pct=Math.round(x.w/ws*100));
+  const per=newAmt/months,rd=n=>Math.round(n/500)*500;
+  const mBias=(sig&&(sig.items.market||sig.items.nifty)||{}).bias||0;
+  const tone=mBias>0?'📈 Signals lean positive — a reasonable time to deploy on your dates.':mBias<0?'📉 Signals lean cautious — stick to the staggered plan, don\'t front-load.':'Steady staggering is the safe default (no strong market signal).';
+  let rows='';for(let mo=1;mo<=months;mo++){
+    const buys=cats.map(x=>`${x.c} — ${inr(rd(per*x.pct/100))} (${x.pct}%)`).join('<br>');
+    rows+=`<tr><td style="vertical-align:top;white-space:nowrap"><b>Month ${mo}</b></td><td style="text-align:left;color:var(--green);font-size:12px">${buys}</td></tr>`;}
+  $('calOut').innerHTML=`<div class="note" style="margin-bottom:8px">${inr(newAmt)} over ${months} month(s) = ${inr(per)}/month. ${tone} Invest on a fixed date each month.</div>
+   <table><thead><tr><th>When</th><th style="text-align:left">Invest into (category · ₹ · %)</th></tr></thead><tbody>${rows}</tbody></table>`;}
 
 function resetGrow(){$('growAmt').value='';$('growOut').innerHTML='';}
 function resetCal(){$('calAmt').value='';$('calMonths').value='3';$('calOut').innerHTML='';}
@@ -474,22 +514,30 @@ function aiReview(){
   let ti=0,tc=0;rows.forEach(r=>{ti+=r.inv;tc+=r.cur;});
   const lines=rows.slice().sort((a,b)=>b.cur-a.cur).map(r=>
     `- ${r.name}: invested ₹${Math.round(r.inv).toLocaleString('en-IN')}, current ₹${Math.round(r.cur).toLocaleString('en-IN')} (${r.pl<0?'loss':'gain'} ₹${Math.round(Math.abs(r.pl)).toLocaleString('en-IN')})`).join('\n');
-  const prompt=`Act as a mutual fund advisor with 25+ years of experience in the Indian market. Give practical, specific advice — not generic tips.
+  const g=f=>rows.filter(f).reduce((a,b)=>a+b.cur,0);
+  const eqp=(g(r=>r.grp==='Equity')/(tc||1)*100).toFixed(0),hyp=(g(r=>r.grp==='Hybrid')/(tc||1)*100).toFixed(0),
+        gop=(g(r=>r.grp==='Metal')/(tc||1)*100).toFixed(0),dep=(g(r=>r.grp==='Debt')/(tc||1)*100).toFixed(0);
+  const prompt=`Act as my SEBI-registered mutual fund advisor. Review my portfolio and give advice as if in a real advisory session: CRISP, POINT-WISE, SHORT. No fluff, no long paragraphs.
 
-My profile: age ${p.age}, investment horizon ${p.horizon} years, comfort with market ups/downs: ${p.risk}.
-Portfolio today: invested ₹${Math.round(ti).toLocaleString('en-IN')}, current value ₹${Math.round(tc).toLocaleString('en-IN')}.
-
-My holdings:
+MY PROFILE: age ${p.age}, horizon ${p.horizon} years, risk comfort: ${p.risk}.
+PORTFOLIO: invested ₹${Math.round(ti).toLocaleString('en-IN')}, current ₹${Math.round(tc).toLocaleString('en-IN')}.
+ALLOCATION NOW: equity ${eqp}%, hybrid ${hyp}%, gold/silver ${gop}%, debt ${dep}%.
+HOLDINGS:
 ${lines}
 
-Please review and tell me, factoring in current market and geopolitical conditions:
-1) For each fund — keep, trim, or exit, with a one-line reason.
-2) Whether my asset allocation (equity / hybrid / gold-silver / debt) suits my age and horizon.
-3) Over-concentration, duplicate funds, or high-cost funds to clean up.
-4) Specific funds/categories to ADD, and a simple plan to push returns higher.
-5) Clear next steps and a sensible buying sequence if I add new money.
+Before answering, CONSIDER ALL of: my age & horizon & risk; current allocation vs an ideal for me; over-concentration and single-AMC risk; duplicate/overlapping funds; high-cost (Regular vs Direct) funds; small/mid-cap exposure vs my risk; gaps (debt, global, index); TODAY'S market and index technicals (Nifty/Sensex/Midcap/Smallcap trend — is it a time to invest, wait, or redeem); tax (loss harvesting, exit loads, LTCG); and my goals.
 
-I'm also attaching my NJ E-Wealth screenshot — cross-check the figures above against it. You are not a SEBI-registered adviser; treat this as educational.`;
+Answer in these short sections, bullets only (1 line each):
+1. VERDICT PER FUND — Keep / Trim / Exit + 4-6 word reason.
+2. ALLOCATION FIX — is my mix right for my age/horizon? target %.
+3. RED FLAGS — concentration, duplicates, cost, over-exposure.
+4. ADD THESE — specific fund categories to add and rough %.
+5. MARKET TIMING — given today's index technicals, invest now / stagger / wait?
+6. TAX — any loss harvesting or exit-load points.
+7. NEXT 3 STEPS — the exact actions to take now.
+End with one line: overall portfolio health (Good / Needs work / Overhaul) and the single most important action.
+
+I'm attaching my NJ E-Wealth screenshot — verify the figures. Keep it short and practical. This is educational, not a formal SEBI advisory.`;
   const done=()=>{$('aiMsg').innerHTML='<span style="color:var(--green)">✓ Prompt copied. Open your AI app, paste it, and attach your NJ screenshot.</span>';};
   if(navigator.clipboard&&navigator.clipboard.writeText){
     navigator.clipboard.writeText(prompt).then(done).catch(()=>showPrompt(prompt));
@@ -513,6 +561,10 @@ function loadProfileForm(){const p=LS.g('profile',null);if(!p)return;$('age').va
   document.querySelectorAll('#riskChips .chip').forEach(c=>c.classList.toggle('on',c.dataset.v===p.risk));}
 function reupload(){show('setup');loadProfileForm();$('shots').value='';$('shotcount').textContent='';}
 function editProfile(){show('setup');loadProfileForm();}
+function resetApp(){
+  if(!confirm('Clear ALL saved data (profile, holdings, history, signals) and start fresh? This cannot be undone.'))return;
+  ['holdings','navs','navDates','history','profile','signals','news'].forEach(k=>localStorage.removeItem(k));
+  location.reload();}
 
 document.querySelectorAll('.chips').forEach(grp=>grp.addEventListener('click',e=>{
   if(!e.target.classList.contains('chip'))return;
