@@ -374,9 +374,10 @@ async function fetchFeed(url){
     if(items.length)return items;
   }catch(e){}}
   return [];}
-async function loadNews(){
+async function loadNews(force){
   const cache=LS.g('news',null);
-  if(cache&&Date.now()-cache.t<2*3600*1000){renderNews(cache.items);return;}
+  if(!force&&cache&&Date.now()-cache.t<2*3600*1000){renderNews(cache.items);return;}
+  $('news').innerHTML='<div class="note">Fetching latest India market &amp; MF news…</div>';
   let all=[];
   for(const [src,url] of NEWS_FEEDS){const items=await fetchFeed(url);
     items.forEach(i=>i.src=src);all=all.concat(items);if(all.length>=8)break;}

@@ -128,24 +128,6 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
     <button data-f="all" class="on">All</button><button data-f="Keep">Keep</button>
     <button data-f="Trim">Trim</button><button data-f="Exit">Exit</button></div>
   <div class="card" id="holdList"></div>
-  <h2>🧠 Advisor notes</h2>
-  <div class="card" id="insights"></div>
-  <h2>📡 News-aware signals</h2>
-  <div class="card">
-    <div class="note" id="sigStatus" style="margin-bottom:10px"></div>
-    <div style="display:flex;gap:8px">
-      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="copySignalPrompt()">📋 Copy news prompt</button>
-      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="toggleSignalPaste()">📥 Paste result</button></div>
-    <div id="sigMsg" class="small" style="margin-top:8px"></div>
-    <div id="sigPaste" class="hide" style="margin-top:8px">
-      <textarea id="sigInput" placeholder="Paste the AI's SIGNALS block here" style="width:100%;height:110px;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea>
-      <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="btn-primary" style="flex:1;border:none;border-radius:10px;padding:11px;color:#fff;font-weight:600" onclick="applySignals()">Apply signals</button>
-        <button class="btn-sec" style="border-radius:10px;padding:11px" onclick="clearSignals()">Clear</button></div>
-    </div>
-  </div>
-  <h2>📰 Market &amp; MF news</h2>
-  <div class="card" id="news"><div class="note">Loading headlines…</div></div>
   <h2>🎯 Plan to grow</h2>
   <div class="card">
     <div class="inline"><div><label style="margin-top:0">How much new money to invest?</label>
@@ -163,6 +145,26 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
       <button class="btn-sec" style="border-radius:10px;padding:12px 12px" onclick="resetCal()">Reset</button></div>
     <div id="calOut" style="margin-top:12px"></div>
   </div>
+  <h2>🧠 Advisor notes</h2>
+  <div class="card" id="insights"></div>
+  <h2>📡 News-aware signals</h2>
+  <div class="card">
+    <div class="note" id="sigStatus" style="margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="copySignalPrompt()">📋 Copy news prompt</button>
+      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="toggleSignalPaste()">📥 Paste result</button></div>
+    <div id="sigMsg" class="small" style="margin-top:8px"></div>
+    <div id="sigPaste" class="hide" style="margin-top:8px">
+      <textarea id="sigInput" placeholder="Paste the AI's SIGNALS block here" style="width:100%;height:110px;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn-primary" style="flex:1;border:none;border-radius:10px;padding:11px;color:#fff;font-weight:600" onclick="applySignals()">Apply signals</button>
+        <button class="btn-sec" style="border-radius:10px;padding:11px" onclick="clearSignals()">Clear</button></div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:22px 2px 9px">
+    <h2 style="margin:0">📰 Market &amp; MF news</h2>
+    <button class="btn-ghost" style="width:auto;padding:6px 13px;font-size:12px;border-radius:20px" onclick="loadNews(true)">↻ Refresh</button></div>
+  <div class="card" id="news"><div class="note">Loading headlines…</div></div>
   <h2>🤖 Get a full AI review</h2>
   <div class="card">
     <div class="note" style="margin-bottom:10px">Copies a ready-made prompt with your profile and holdings. Paste it into your AI app (Claude / ChatGPT / Gemini) and attach your NJ screenshot for a deeper, reasoning-grade review.</div>
