@@ -8,15 +8,16 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="MF Tracker">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<!-- OCR engine (tesseract) is loaded on demand only when you upload screenshots, to save memory/battery -->
+<!-- OCR (tesseract) and PDF (pdf.js) engines load on demand only when you import, to save memory/battery -->
 <style>
 :root{--card:#fff;--ink:#13213f;--muted:#667089;--green:#0f9d58;--greenbg:#e7f6ee;
 --red:#d23f3f;--redbg:#fbeaea;--amber:#c77700;--amberbg:#fdf2e2;--blue:#1457d6;--line:#e6e9f0;--page:#f4f6fb}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--page);color:var(--ink);font-size:16px}
 .wrap{max-width:480px;margin:0 auto;padding:max(14px,env(safe-area-inset-top)) 14px calc(86px + env(safe-area-inset-bottom))}
-header.top{background:linear-gradient(135deg,#143a8c,#1457d6);color:#fff;border-radius:16px;padding:16px 18px;margin-bottom:14px}
+header.top{background:linear-gradient(135deg,#143a8c,#1457d6);color:#fff;border-radius:16px;padding:16px 18px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-start}
 header.top h1{margin:0 0 2px;font-size:19px}header.top p{margin:0;opacity:.85;font-size:12px}
+.langbtn{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;min-height:32px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:12px}
 h2{font-size:16px;margin:18px 2px 9px}
 label{font-size:14px;color:var(--muted);display:block;margin:10px 0 5px}
@@ -27,7 +28,7 @@ input,select{font-size:16px;width:100%;padding:12px;border:1px solid var(--line)
 .btn{display:block;width:100%;text-align:center;border:none;border-radius:12px;padding:15px;font-size:16px;font-weight:600;cursor:pointer;min-height:50px}
 .btn-primary{background:#13213f;color:#fff}.btn-ghost{background:#fff;color:var(--blue);border:1px solid var(--line)}
 .btn-sec{background:#fff;color:var(--ink);border:1px solid var(--line)}
-.drop{border:2px dashed #c4cfe0;border-radius:14px;padding:24px;text-align:center;color:var(--muted)}
+.drop{border:2px dashed #c4cfe0;border-radius:14px;padding:20px;text-align:center;color:var(--muted)}
 .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .kpi{background:var(--page);border-radius:11px;padding:12px}
 .kpi .l{font-size:12px;color:var(--muted);margin-bottom:3px}.kpi .v{font-size:20px;font-weight:700}
@@ -38,15 +39,18 @@ input,select{font-size:16px;width:100%;padding:12px;border:1px solid var(--line)
 .fname{font-size:14px;font-weight:500}.fsub{font-size:11px;color:var(--muted);margin-top:1px}
 .why{font-size:11.5px;color:var(--ink);opacity:.8;margin-top:4px;line-height:1.45}
 .tag{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap}
-.t-Keep{background:var(--greenbg);color:var(--green)}.t-Trim{background:var(--amberbg);color:var(--amber)}.t-Exit{background:var(--redbg);color:var(--red)}
+.t-ok{background:var(--greenbg);color:var(--green)}.t-watch{background:var(--amberbg);color:var(--amber)}.t-review{background:var(--redbg);color:var(--red)}
 .lag{color:var(--amber)}
 .allocbar{height:10px;border-radius:6px;overflow:hidden;display:flex;margin:6px 0 5px}
 .allocbar span{display:block;height:100%}
 .legend{font-size:12px;color:var(--muted)}
-.filterbar{display:flex;gap:7px;margin:0 2px 10px}
-.filterbar button{border:1px solid var(--line);background:#fff;border-radius:20px;padding:7px 16px;font-size:13px;color:var(--ink);min-height:40px}
+.filterbar{display:flex;gap:7px;margin:0 2px 10px;flex-wrap:wrap}
+.filterbar button{border:1px solid var(--line);background:#fff;border-radius:20px;padding:7px 14px;font-size:13px;color:var(--ink);min-height:40px}
 .filterbar button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 .note{font-size:12.5px;color:var(--muted);line-height:1.55}
+.banner{font-size:12.5px;line-height:1.5;border-radius:10px;padding:9px 11px;margin-bottom:10px}
+.banner.info{background:#eef4ff;border:1px solid #d4e2fb;color:var(--ink)}
+.banner.warn{background:var(--amberbg);border:1px solid #f0ddb8;color:#7a5200}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line)}
 th{font-size:10px;color:var(--muted);text-transform:uppercase}
@@ -59,132 +63,191 @@ display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
 .bottombar button{flex:1;border:1px solid var(--line);background:#fff;border-radius:11px;padding:11px 6px;font-size:12px;color:var(--ink);min-height:48px}
 .hide{display:none}
 .disclaimer{font-size:11px;color:var(--muted);line-height:1.5;border-top:1px solid var(--line);padding-top:12px;margin-top:14px}
+details.gl{border-bottom:1px solid var(--line);padding:8px 0}
+details.gl:last-child{border-bottom:none}
+details.gl summary{font-size:13.5px;font-weight:600;cursor:pointer}
+details.gl div{font-size:12.5px;color:var(--muted);line-height:1.55;padding:6px 0 2px}
+.qz{margin-bottom:14px}
+.qz p{font-size:14px;margin:0 0 7px;font-weight:500}
 #busy{position:fixed;inset:0;background:rgba(244,246,251,.94);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:50;text-align:center;padding:24px}
 .spin{width:34px;height:34px;border:3px solid #d4e2fb;border-top-color:var(--blue);border-radius:50%;animation:s 1s linear infinite;margin-bottom:14px}
 @keyframes s{to{transform:rotate(360deg)}}
 </style></head><body>
 
-<div id="busy"><div class="spin"></div><div id="busytxt" style="font-size:14px;color:var(--ink)">Reading…</div><div id="busysub" class="small" style="margin-top:6px"></div></div>
+<div id="busy" role="alert"><div class="spin"></div><div id="busytxt" style="font-size:14px;color:var(--ink)">Reading…</div><div id="busysub" class="small" style="margin-top:6px"></div></div>
 
 <div class="wrap">
-<header class="top"><h1>MF Tracker</h1><p>Your private, on-device fund tracker · <span id="ver" style="opacity:.85"></span></p></header>
+<header class="top">
+  <div><h1>MF Tracker</h1><p><span data-i18n="tagline">Your private, on-device fund tracker</span> · <span id="ver" style="opacity:.85"></span></p></div>
+  <button class="langbtn" id="langBtn" onclick="toggleLang()" aria-label="Switch language">हिं</button>
+</header>
 
-<div id="setup" class="hide">
-  <button id="backSetup" class="btn-ghost hide" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px;margin-bottom:10px" onclick="backDash()">‹ Back to dashboard</button>
+<!-- ============ FIRST-RUN WELCOME / DISCLOSURE ============ -->
+<div id="welcome" class="hide">
   <div class="card">
-    <p style="font-size:16px;font-weight:600;margin:0 0 2px">Tell us about you</p>
-    <p class="small" style="margin:0 0 6px">Stays on this phone. Never uploaded anywhere.</p>
-    <label>Age</label>
-    <input id="age" type="number" inputmode="numeric" placeholder="36" style="width:110px">
-    <label>Investment horizon</label>
-    <div class="chips" id="horizonChips">
-      <div class="chip" data-v="<3">Under 3 yrs</div><div class="chip" data-v="3-5">3–5 yrs</div>
-      <div class="chip" data-v="5-7">5–7 yrs</div><div class="chip" data-v="7+">7+ yrs</div></div>
-    <label>Comfort with ups and downs</label>
-    <div class="chips" id="riskChips">
-      <div class="chip" data-v="calm">Calm</div><div class="chip" data-v="nervous">A bit nervous</div>
-      <div class="chip" data-v="cautious">Cautious</div></div>
-  </div>
-  <div class="card">
-    <p style="font-size:15px;font-weight:600;margin:0 0 8px">Add your portfolio</p>
-    <label for="shots" class="drop" style="display:block;cursor:pointer">
-      <div style="font-size:26px">📷</div><div style="font-weight:600;margin-top:6px">Upload NJ screenshots</div>
-      <div class="small">Add all pages. Duplicates handled automatically.</div></label>
-    <input id="shots" type="file" accept="image/*" multiple class="hide">
-    <div id="shotcount" class="small" style="margin:8px 0 0"></div>
-    <button class="btn btn-primary" style="margin-top:12px" onclick="onBuild()">Read screenshots &amp; continue</button>
-  </div>
-  <div class="card">
-    <button class="btn btn-sec" style="color:var(--red);border-color:var(--redbg)" onclick="resetApp()">🗑 Reset app &amp; clear all data</button>
-    <div class="small" style="margin-top:6px">Erases your profile, holdings, history and signals from this phone and starts fresh.</div>
+    <p style="font-size:17px;font-weight:700;margin:0 0 8px" data-i18n="w_title">Before we start — please read this</p>
+    <div class="note" style="color:var(--ink)" data-i18n-html="w_body">
+      <p style="margin:0 0 8px"><b>What this app is:</b> an educational tool that reads your mutual fund statement, shows where your money sits, and points out things worth understanding — like duplicate funds, high concentration, or a mix that may not suit your age and goals.</p>
+      <p style="margin:0 0 8px"><b>What this app is NOT:</b> it is <b>not investment advice</b> and it is <b>not from a SEBI-registered investment adviser</b>. It uses simple, transparent rules. Before you buy or sell anything, please talk to a SEBI-registered adviser or your distributor.</p>
+      <p style="margin:0 0 8px"><b>Your privacy:</b> everything you enter stays on this phone. Nothing is uploaded to any server.</p>
+      <p style="margin:0"><b>Your responsibility:</b> screenshot reading can make mistakes. Always check the numbers on the review screen. Mutual fund investments are subject to market risks — read all scheme-related documents carefully.</p>
+    </div>
+    <button class="btn btn-primary" style="margin-top:14px" onclick="acceptConsent()" data-i18n="w_btn">I understand — continue</button>
   </div>
 </div>
 
+<!-- ============ SETUP ============ -->
+<div id="setup" class="hide">
+  <button id="backSetup" class="btn-ghost hide" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px;margin-bottom:10px" onclick="backDash()">‹ <span data-i18n="back">Back to dashboard</span></button>
+  <div class="card">
+    <p style="font-size:16px;font-weight:600;margin:0 0 2px" data-i18n="s_about">Tell us about you</p>
+    <p class="small" style="margin:0 0 6px" data-i18n="s_priv">Stays on this phone. Never uploaded anywhere.</p>
+    <label for="age" data-i18n="s_age">Age</label>
+    <input id="age" type="number" inputmode="numeric" placeholder="36" style="width:110px">
+    <label data-i18n="s_hz">Investment horizon (when will you need this money?)</label>
+    <div class="chips" id="horizonChips" role="radiogroup">
+      <div class="chip" role="radio" data-v="<3">Under 3 yrs</div><div class="chip" role="radio" data-v="3-5">3–5 yrs</div>
+      <div class="chip" role="radio" data-v="5-7">5–7 yrs</div><div class="chip" role="radio" data-v="7+">7+ yrs</div></div>
+    <label data-i18n="s_plan">Plan type on your statement (check for the word "Direct")</label>
+    <div class="chips" id="planChips" role="radiogroup">
+      <div class="chip" role="radio" data-v="regular">Regular (via distributor / NJ)</div>
+      <div class="chip" role="radio" data-v="direct">Direct</div>
+      <div class="chip" role="radio" data-v="mixed">Not sure / mixed</div></div>
+  </div>
+
+  <div class="card">
+    <p style="font-size:16px;font-weight:600;margin:0 0 2px" data-i18n="s_quiz">Quick risk check-up</p>
+    <p class="small" style="margin:0 0 12px" data-i18n="s_quiz2">6 short questions. This decides how the app judges your mix — answer honestly, there are no wrong answers.</p>
+    <div id="quiz"></div>
+    <div id="quizBand" class="banner info hide"></div>
+  </div>
+
+  <div class="card">
+    <p style="font-size:15px;font-weight:600;margin:0 0 8px" data-i18n="s_add">Add your portfolio</p>
+    <label for="shots" class="drop" style="display:block;cursor:pointer">
+      <div style="font-size:26px">📷</div><div style="font-weight:600;margin-top:6px" data-i18n="s_shots">Upload portfolio screenshots</div>
+      <div class="small" data-i18n="s_shots2">NJ, Groww, Coin, Kuvera, ET Money… Add all pages; duplicates are handled.</div></label>
+    <input id="shots" type="file" accept="image/*" multiple class="hide">
+    <div id="shotcount" class="small" style="margin:8px 0 0" aria-live="polite"></div>
+    <button class="btn btn-primary" style="margin-top:12px" onclick="onBuild()" data-i18n="s_read">Read screenshots &amp; continue</button>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <label class="btn-sec" style="flex:1;text-align:center;border-radius:10px;padding:12px;font-size:13px;cursor:pointer">📄 <span data-i18n="s_cas">Import CAS PDF (beta)</span>
+        <input id="casFile" type="file" accept="application/pdf" class="hide"></label>
+      <button class="btn-sec" style="flex:1;border-radius:10px;padding:12px;font-size:13px" onclick="manualEntry()" data-i18n="s_manual">✍️ Enter manually</button>
+    </div>
+    <p class="small" style="margin:8px 0 0" data-i18n="s_cas2">CAS = the consolidated statement PDF that CAMS/KFintech email you monthly. Most reliable source of exact figures.</p>
+  </div>
+
+  <div class="card">
+    <button class="btn btn-sec" style="color:var(--red);border-color:var(--redbg)" onclick="resetApp()">🗑 <span data-i18n="s_reset">Reset app &amp; clear all data</span></button>
+    <div class="small" style="margin-top:6px" data-i18n="s_reset2">Erases your profile, holdings, history and signals from this phone and starts fresh.</div>
+  </div>
+</div>
+
+<!-- ============ REVIEW ============ -->
 <div id="review" class="hide">
-  <button id="backReview" class="btn-ghost hide" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px;margin-bottom:10px" onclick="backDash()">‹ Back to dashboard</button>
+  <button id="backReview" class="btn-ghost hide" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px;margin-bottom:10px" onclick="backDash()">‹ <span data-i18n="back">Back to dashboard</span></button>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:baseline">
       <p style="font-size:16px;font-weight:600;margin:0" id="reviewTitle">Review funds</p>
       <span class="small" id="dedupNote"></span></div>
-    <p class="small" style="margin:4px 0 12px">Check <b>Invested</b> and <b>Current</b> for each (the two ₹ amounts on each NJ card). Units are worked out from the live NAV, so you don't need to type them.</p>
+    <p class="small" style="margin:4px 0 12px" data-i18n="r_help">Check <b>Invested</b> and <b>Current</b> for each fund against your statement — this is your safety net against reading mistakes. Units and buy year are optional but make the numbers more exact.</p>
+    <div id="editTotals" class="banner info hide"></div>
     <div id="editList"></div>
-    <button class="btn btn-primary" style="margin-top:10px" onclick="saveHoldings()">Build my dashboard</button>
-    <p class="small" id="matchStatus" style="margin-top:8px"></p>
+    <button class="btn-sec" style="width:100%;border-radius:10px;padding:11px;margin-top:2px" onclick="addEditRow()">＋ <span data-i18n="r_addrow">Add another fund</span></button>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="saveHoldings()" data-i18n="r_build">Build my dashboard</button>
+    <p class="small" id="matchStatus" style="margin-top:8px" aria-live="polite"></p>
   </div>
 </div>
 
+<!-- ============ DASHBOARD ============ -->
 <div id="dash" class="hide">
+  <div class="banner warn" style="margin-bottom:10px" data-i18n="d_disc">
+    Educational tool — not SEBI-registered investment advice. Check figures against your statement and confirm any buy/sell with a registered adviser.</div>
   <div class="card" style="padding:11px 14px">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <span id="status" class="small">Loading…</span>
-      <button class="btn-ghost" style="width:auto;padding:7px 14px;font-size:12px;border-radius:20px" onclick="refresh(true)">↻ Refresh</button></div>
+      <span id="status" class="small" aria-live="polite">Loading…</span>
+      <button class="btn-ghost" style="width:auto;padding:7px 14px;font-size:12px;border-radius:20px" onclick="refresh(true)">↻ <span data-i18n="d_refresh">Refresh</span></button></div>
   </div>
+  <div id="staleCtx"></div>
   <div class="kpis" id="kpis"></div>
-  <h2>Where your money sits</h2>
+  <h2 data-i18n="h_alloc">Where your money sits</h2>
   <div class="card" style="padding:12px 14px">
     <div class="allocbar" id="allocbar"></div><div class="legend" id="alloclegend"></div>
     <div class="note" id="allocAdvice" style="margin-top:8px"></div></div>
-  <h2>Value &amp; projection over time</h2>
-  <div class="card" style="padding:10px 12px"><div class="chart-box" style="height:130px"><canvas id="trendChart"></canvas></div>
+  <h2 data-i18n="h_proj">Value &amp; projection over time</h2>
+  <div class="card" style="padding:10px 12px"><div class="chart-box" style="height:130px"><canvas id="trendChart" aria-label="Portfolio value trend chart"></canvas></div>
     <div class="note" id="projection" style="margin-top:6px"></div></div>
-  <h2>Fund-by-fund</h2>
+  <h2 data-i18n="h_funds">Fund-by-fund</h2>
   <div class="filterbar" id="holdFilters">
-    <button data-f="all" class="on">All</button><button data-f="Keep">Keep</button>
-    <button data-f="Trim">Trim</button><button data-f="Exit">Exit</button></div>
+    <button data-f="all" class="on">All</button><button data-f="ok">On track</button>
+    <button data-f="watch">Watch</button><button data-f="review">Review</button></div>
   <div class="card" id="holdList"></div>
-  <h2>🎯 Plan to grow</h2>
+  <h2>🎯 <span data-i18n="h_grow">Plan new money</span></h2>
   <div class="card">
-    <div class="inline"><div><label style="margin-top:0">How much new money to invest?</label>
+    <div class="inline"><div><label style="margin-top:0" data-i18n="g_amt">How much new money to invest?</label>
       <input id="growAmt" type="number" inputmode="numeric" placeholder="e.g. 380000"></div>
-      <button class="btn-primary" style="border:none;border-radius:10px;padding:12px 16px;font-weight:600;color:#fff" onclick="planGrow()">Plan</button>
-      <button class="btn-sec" style="border-radius:10px;padding:12px 14px" onclick="resetGrow()">Reset</button></div>
+      <button class="btn-primary" style="border:none;border-radius:10px;padding:12px 16px;font-weight:600;color:#fff" onclick="planGrow()" data-i18n="g_plan">Plan</button>
+      <button class="btn-sec" style="border-radius:10px;padding:12px 14px" onclick="resetGrow()" data-i18n="g_reset">Reset</button></div>
     <div id="growOut" style="margin-top:12px"></div>
   </div>
-  <h2>🗓️ Buy calendar</h2>
+  <h2>🗓️ <span data-i18n="h_cal">Buy calendar</span></h2>
   <div class="card">
     <div class="inline">
-      <div><label style="margin-top:0">Amount</label><input id="calAmt" type="number" inputmode="numeric" placeholder="e.g. 380000"></div>
-      <div style="max-width:80px"><label style="margin-top:0">Months</label><input id="calMonths" type="number" inputmode="numeric" value="3"></div>
-      <button class="btn-primary" style="border:none;border-radius:10px;padding:12px 14px;font-weight:600;color:#fff" onclick="planCal()">Build</button>
-      <button class="btn-sec" style="border-radius:10px;padding:12px 12px" onclick="resetCal()">Reset</button></div>
+      <div><label style="margin-top:0" data-i18n="c_amt">Amount</label><input id="calAmt" type="number" inputmode="numeric" placeholder="e.g. 380000"></div>
+      <div style="max-width:80px"><label style="margin-top:0" data-i18n="c_mo">Months</label><input id="calMonths" type="number" inputmode="numeric" value="3"></div>
+      <button class="btn-primary" style="border:none;border-radius:10px;padding:12px 14px;font-weight:600;color:#fff" onclick="planCal()" data-i18n="c_build">Build</button>
+      <button class="btn-sec" style="border-radius:10px;padding:12px 12px" onclick="resetCal()" data-i18n="g_reset">Reset</button></div>
     <div id="calOut" style="margin-top:12px"></div>
   </div>
-  <h2>🧠 Advisor notes</h2>
+  <h2>🧠 <span data-i18n="h_notes">Things worth understanding</span></h2>
   <div class="card" id="insights"></div>
-  <h2>📡 News-aware signals</h2>
+  <h2>📡 <span data-i18n="h_sig">News-aware signals</span></h2>
   <div class="card">
     <div class="note" id="sigStatus" style="margin-bottom:10px"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="copySignalPrompt()">📋 Copy news prompt</button>
-      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="toggleSignalPaste()">📥 Paste result</button></div>
-    <div id="sigMsg" class="small" style="margin-top:8px"></div>
+      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="copySignalPrompt()">📋 <span data-i18n="sg_copy">Copy news prompt</span></button>
+      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="toggleSignalPaste()">📥 <span data-i18n="sg_paste">Paste result</span></button></div>
+    <div id="sigMsg" class="small" style="margin-top:8px" aria-live="polite"></div>
     <div id="sigPaste" class="hide" style="margin-top:8px">
       <textarea id="sigInput" placeholder="Paste the AI's SIGNALS block here" style="width:100%;height:110px;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea>
       <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="btn-primary" style="flex:1;border:none;border-radius:10px;padding:11px;color:#fff;font-weight:600" onclick="applySignals()">Apply signals</button>
-        <button class="btn-sec" style="border-radius:10px;padding:11px" onclick="clearSignals()">Clear</button></div>
+        <button class="btn-primary" style="flex:1;border:none;border-radius:10px;padding:11px;color:#fff;font-weight:600" onclick="applySignals()" data-i18n="sg_apply">Apply signals</button>
+        <button class="btn-sec" style="border-radius:10px;padding:11px" onclick="clearSignals()" data-i18n="sg_clear">Clear</button></div>
     </div>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin:22px 2px 9px">
-    <h2 style="margin:0">📰 Market &amp; MF news</h2>
-    <button class="btn-ghost" style="width:auto;padding:6px 13px;font-size:12px;border-radius:20px" onclick="loadNews(true)">↻ Refresh</button></div>
+    <h2 style="margin:0">📰 <span data-i18n="h_news">Market &amp; MF news</span></h2>
+    <button class="btn-ghost" style="width:auto;padding:6px 13px;font-size:12px;border-radius:20px" onclick="loadNews(true)">↻ <span data-i18n="d_refresh">Refresh</span></button></div>
   <div class="card" id="news"><div class="note">Loading headlines…</div></div>
-  <h2>🤖 Get a full AI review</h2>
+  <h2>🤖 <span data-i18n="h_ai">Get a full AI review</span></h2>
   <div class="card">
-    <div class="note" style="margin-bottom:10px">Copies a ready-made prompt with your profile and holdings. Paste it into your AI app (Claude / ChatGPT / Gemini) and attach your NJ screenshot for a deeper, reasoning-grade review.</div>
-    <button class="btn btn-primary" onclick="aiReview()">📋 Copy review prompt</button>
-    <div id="aiMsg" class="small" style="margin-top:8px"></div>
+    <div class="note" style="margin-bottom:10px" data-i18n="ai_help">Copies a ready-made prompt with your profile and holdings. Paste it into your AI app (Claude / ChatGPT / Gemini) for a deeper educational review. Your fund names and amounts will be shared with that AI service — no account numbers are included.</div>
+    <button class="btn btn-primary" onclick="aiReview()">📋 <span data-i18n="ai_btn">Copy review prompt</span></button>
+    <div id="aiMsg" class="small" style="margin-top:8px" aria-live="polite"></div>
     <div class="note" style="margin-top:10px">Open: <a href="https://claude.ai/new" target="_blank" rel="noopener">Claude</a> · <a href="https://chatgpt.com" target="_blank" rel="noopener">ChatGPT</a> · <a href="https://gemini.google.com/app" target="_blank" rel="noopener">Gemini</a></div>
   </div>
+  <h2>💾 <span data-i18n="h_data">Data &amp; backup</span></h2>
+  <div class="card">
+    <div class="note" style="margin-bottom:10px" data-i18n="dt_help">Your data lives only in this browser and can be lost if the phone clears storage. Export a backup file now and again; import it to restore on this or another phone.</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="exportData()">⬇️ <span data-i18n="dt_exp">Export backup</span></button>
+      <label class="btn-sec" style="flex:1;text-align:center;border-radius:10px;padding:11px;cursor:pointer">⬆️ <span data-i18n="dt_imp">Import backup</span>
+        <input id="impFile" type="file" accept="application/json,.json" class="hide"></label>
+    </div>
+    <div id="dataMsg" class="small" style="margin-top:8px" aria-live="polite"></div>
+  </div>
+  <h2>📖 <span data-i18n="h_gloss">What do these words mean?</span></h2>
+  <div class="card" id="gloss"></div>
 
-  <div class="disclaimer">NAVs are official AMFI values (mfapi.in), fetched live in your browser; if stale, the fund is flagged and the last good value is shown. All data stays on this phone. The keep/trim/exit notes use market context current as of <b id="ctxd">Jun 2026</b> plus your age and horizon — this is an automated second opinion, not advice from a SEBI-registered adviser. Mutual funds carry market risk. Confirm any buy/sell with a registered adviser.</div>
+  <div class="disclaimer" data-i18n-html="d_footer">NAVs are official AMFI values (via mfapi.in with AMFI fallback), fetched live in your browser; if stale, the fund is flagged and the last good value is shown. All data stays on this phone. The On-track/Watch/Review notes come from a transparent rules engine using your age, horizon and risk answers — they are <b>educational observations, not investment advice, and not from a SEBI-registered adviser</b>. Mutual fund investments are subject to market risks; read all scheme-related documents carefully. Confirm any buy or sell decision with a SEBI-registered investment adviser or your distributor.</div>
 </div>
 </div>
 
 <div class="bottombar hide" id="bar">
-  <button onclick="refresh(true)">↻<br>NAVs</button>
-  <button onclick="reupload()">📷<br>Update</button>
-  <button onclick="editProfile()">⚙<br>Profile</button>
+  <button onclick="refresh(true)">↻<br><span data-i18n="b_nav">NAVs</span></button>
+  <button onclick="reupload()">📷<br><span data-i18n="b_upd">Update</span></button>
+  <button onclick="editProfile()">⚙<br><span data-i18n="b_prof">Profile</span></button>
 </div>
 
 <script src="app.js"></script>
