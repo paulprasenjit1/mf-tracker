@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='2.1 · build 21';
+const APP_VERSION='2.2 · build 22';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -147,22 +147,61 @@ async function getNav(code){
     const d=j.data&&j.data[0];if(d&&parseFloat(d.nav)>0)return{nav:parseFloat(d.nav),date:d.date};}catch(e){}}
   try{const map=await fetchAmfiMap();if(map[code])return map[code];}catch(e){}
   return null;}
-/* Plan-aware AMFI matching: respects the user's Regular/Direct choice. */
+/* Plan-aware AMFI matching with fuzzy name scoring.
+   Handles statement short-forms: "FoF" vs "Fund of Fund", "&" vs "and",
+   and renamed schemes (e.g. "Nippon India Growth Mid Cap Fund" vs AMFI's
+   "Nippon India Growth Fund") via token-set similarity, not substring luck. */
+function normFund(s){return String(s).toLowerCase()
+  .replace(/\bfof\b/g,'fund of fund')
+  .replace(/&/g,' and ')
+  .replace(/[-–—()]/g,' ')
+  .replace(/[^a-z0-9 ]/g,' ')
+  .replace(/\s+/g,' ').trim();}
+const FUND_STOP=new Set(['plan','growth','gr','regular','direct','option','scheme','the','an']);
+function fundTokens(s){return new Set(normFund(s).split(' ').filter(w=>w&&!FUND_STOP.has(w)));}
+function fundSim(a,b){const A=fundTokens(a),B=fundTokens(b);
+  if(!A.size||!B.size)return 0;
+  let inter=0;A.forEach(w=>{if(B.has(w))inter++;});
+  let s=inter/(A.size+B.size-inter);
+  if(inter===A.size||inter===B.size)s+=0.15; // one name contained in the other
+  return s;}
+let _amfiNamesP=null;
+function fetchAmfiNames(){ // official AMFI scheme list (name+code), for last-resort matching
+  if(_amfiNamesP)return _amfiNamesP;
+  _amfiNamesP=(async()=>{
+    for(const px of PROXIES){try{
+      const r=await fetch(px('https://www.amfiindia.com/spages/NAVAll.txt'),{cache:'no-store'});
+      const txt=await r.text();const list=[];
+      txt.split('\n').forEach(l=>{const p=l.split(';');
+        if(p.length>=6&&/^\d+$/.test(p[0].trim()))list.push({code:p[0].trim(),name:p[3].trim()});});
+      if(list.length>1000)return list;
+    }catch(e){}}
+    throw new Error('amfi unavailable');})();
+  _amfiNamesP.catch(()=>{_amfiNamesP=null;});
+  return _amfiNamesP;}
 async function matchCode(name){
   const plan=(LS.g('profile',{}).plan)||'regular';
-  const tries=[name,name.replace(/fund.*$/i,'fund'),name.split(/\s+/).slice(0,4).join(' ')];
-  for(const q of tries){try{const r=await fetch(SEARCH(q));const arr=await r.json();if(!arr||!arr.length)continue;
-    const growth=arr.filter(s=>/growth/i.test(s.schemeName)&&!/idcw|dividend|bonus/i.test(s.schemeName));
-    let cands;
-    if(plan==='direct')cands=growth.filter(s=>/direct/i.test(s.schemeName));
-    else if(plan==='regular')cands=growth.filter(s=>!/direct/i.test(s.schemeName));
-    else cands=growth;
-    if(!cands.length)cands=growth;
-    const ordered=plan==='direct'?cands:[...cands.filter(s=>/regular/i.test(s.schemeName)),...cands.filter(s=>!/regular/i.test(s.schemeName))];
-    for(const s of ordered.slice(0,4)){const x=await getNav(String(s.schemeCode));
-      if(x&&lagDays(x.date)<20)return{code:String(s.schemeCode),official:s.schemeName};}
-    if(ordered[0])return{code:String(ordered[0].schemeCode),official:ordered[0].schemeName};}catch(e){}}
-  return null;}
+  const nn=normFund(name),words=nn.split(' ');
+  const queries=[...new Set([name,nn,words.slice(0,5).join(' '),words.slice(0,4).join(' '),words.slice(0,3).join(' '),words.slice(0,2).join(' ')])].filter(q=>q&&q.length>=6);
+  let best=null,bestAny=null;
+  const consider=(schemeName,schemeCode)=>{
+    if(!schemeName||!/growth/i.test(schemeName)||/idcw|dividend|bonus|segregated/i.test(schemeName))return;
+    let s=fundSim(name,schemeName);
+    const isDirect=/direct/i.test(schemeName);
+    if(plan==='mixed'&&!isDirect)s+=0.02; // when unsure, lean Regular (distributor statements)
+    const cand={s,code:String(schemeCode),official:schemeName};
+    if(!bestAny||s>bestAny.s)bestAny=cand;
+    if(plan==='direct'&&!isDirect)return;
+    if(plan==='regular'&&isDirect)return;
+    if(!best||s>best.s)best=cand;};
+  for(const q of queries){
+    try{const r=await fetch(SEARCH(q));const arr=await r.json();
+      if(Array.isArray(arr))arr.forEach(x=>consider(x.schemeName,x.schemeCode));}catch(e){}
+    if(best&&best.s>=0.75)break;}
+  if(!(best&&best.s>=0.45)){ // last resort: score against the full official AMFI list
+    try{(await fetchAmfiNames()).forEach(x=>consider(x.name,x.code));}catch(e){}}
+  const pick=(best&&best.s>=0.45)?best:((bestAny&&bestAny.s>=0.45)?bestAny:null);
+  return pick?{code:pick.code,official:pick.official}:null;}
 
 /* ---------- navigation & consent ---------- */
 function show(id){['welcome','setup','review','dash'].forEach(s=>{const el=$(s);if(el)el.classList.add('hide');});
@@ -349,13 +388,13 @@ async function saveHoldings(){
   const rows=editRows.filter(r=>r.name&&r.name.trim().length>3&&(r.cur>0||r.inv>0));
   if(!rows.length){alert('Add at least one fund with a name and a current value.');return;}
   busy(true,'Matching funds to AMFI…','Finding the official NAV code for each fund.');
-  const holds=[],navs=LS.g('navs',{}),dates=LS.g('navDates',{});let miss=0;
+  const holds=[],navs=LS.g('navs',{}),dates=LS.g('navDates',{});const missNames=[];
   for(const r of rows){$('busysub').textContent=r.name;
     const m=await matchCode(r.name);const [cat,grp]=classify(r.name);
     let code=null,official=null,nav=0;
     if(m){code=m.code;official=m.official;
       const x=await getNav(code);if(x){nav=x.nav;navs[code]=x.nav;dates[code]=x.date;}}
-    else miss++;
+    else missNames.push(r.name);
     const inv=r.inv||0,cur=r.cur||0;
     /* Units: prefer what the user/statement gave us (exact). Otherwise derive
        from current value ÷ latest NAV — an approximation, flagged as such. */
@@ -368,7 +407,7 @@ async function saveHoldings(){
   if(!holds.length){alert('Nothing to save. Check the fund names.');return;}
   LS.s('holdings',holds);
   resetGrow();resetCal();
-  if(miss)alert(miss+' fund(s) could not be matched to AMFI. They are kept with the values you entered, but their prices will not update live. You can edit the name (closer to the official scheme name) and re-save.');
+  if(missNames.length)alert('Could not match to AMFI:\n• '+missNames.join('\n• ')+'\n\nThey are kept with the values you entered, but their prices will not update live. Tap 📷 Update, edit the name closer to the official scheme name, and re-save.');
   refresh();}
 
 /* ---------- live refresh ---------- */
