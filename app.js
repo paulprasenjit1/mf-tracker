@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='2.0 · build 20';
+const APP_VERSION='2.1 · build 21';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -196,7 +196,32 @@ async function onBuild(){
 function strip1(x){ // drop a spurious leading digit (OCR reads ₹ as 3/7): 326048.62 -> 26048.62
   if(!x||x<=0)return 0;const s=x.toFixed(2),d=s.indexOf('.'),ip=s.slice(0,d);
   if(ip.length<=1)return 0;return parseFloat(ip.slice(1)+s.slice(d));}
+/* Statement summary totals (the "Inv. Amt / Current Value" card on the report).
+   Those totals are printed WITHOUT decimals, while every fund amount has .xx —
+   so comma-grouped integers are a reliable signature of the summary card. */
+let _stmtTot=null;
+function parseStmtTotals(text){
+  const ints=[...text.matchAll(/(?:^|[^.\d])(\d{1,2}(?:,\d{2,3})+)(?![\d,.])/g)]
+    .map(m=>parseFloat(m[1].replace(/,/g,''))).filter(n=>n>=1000);
+  if(ints.length>=2&&ints[1]/ints[0]>0.5&&ints[1]/ints[0]<2)return{inv:ints[0],cur:ints[1]};
+  return null;}
+/* If row sums drift from the statement totals, greedily undo "₹ read as 3/7"
+   leading-digit errors on whichever rows bring the sums back in line. */
+function reconcileTotals(rows,tot){
+  if(!tot||!rows.length)return;
+  [['inv',tot.inv],['cur',tot.cur]].forEach(([fld,target])=>{
+    if(!target)return;
+    const tolr=Math.max(10,target*0.002);
+    let sum=rows.reduce((a,r)=>a+(r[fld]||0),0),guard=0;
+    while(Math.abs(sum-target)>tolr&&guard++<=rows.length){
+      let bestR=null,bestV=0,bestGain=1;
+      rows.forEach(r=>{const s=strip1(r[fld]);if(s>0){const ns=sum-r[fld]+s;
+        const gain=Math.abs(sum-target)-Math.abs(ns-target);
+        if(gain>bestGain){bestGain=gain;bestR=r;bestV=s;}}});
+      if(!bestR)break;
+      sum=sum-bestR[fld]+bestV;bestR[fld]=bestV;bestR.flag=true;}});}
 function parsePortfolio(text){
+  _stmtTot=parseStmtTotals(text);
   const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);const out=[];
   const isName=l=>/[A-Za-z]{4,}/.test(l)&&/(fund|etf|flexi|index|nifty|psu|multi[- ]?asset|bond|gilt|debt)/i.test(l)&&!/^(inv\.|inv\s+amt|cur\.|bal\s*units|abs\.|unr\.|as on|scheme|investor|net asset|folio|isin|registrar|nominee|total)/i.test(l);
   for(let i=0;i<lines.length;i++){if(!isName(lines[i]))continue;
@@ -207,33 +232,45 @@ function parsePortfolio(text){
     if(name.length<6)continue;
     let end=Math.min(lines.length,i+9);
     for(let j=i+1;j<end;j++){if(isName(lines[j])){end=j;break;}}
-    const blk=lines.slice(i,end).join(' ').replace(/-?\d[\d,]*\.\d+\s*%/g,' ');
+    const blk0=lines.slice(i,end).join(' ');
+    // Return %s from the card ("Abs. / Ann Ret.") — a second identity to verify amounts.
+    // OCR often loses minus signs, so magnitudes are used and BOTH signs are tried everywhere.
+    const pcts=(blk0.match(/-?\d[\d,]*\.\d{1,2}\s*%/g)||[]).map(s=>Math.abs(parseFloat(s.replace(/[,\s%]/g,'')))).filter(p=>p>0&&p<300);
+    const blk=blk0.replace(/-?\d[\d,]*\.\d+\s*%/g,' ');
     const signed=(blk.match(/-?\d[\d,]*\.\d{2}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
     const pos=signed.filter(x=>x>0);
     const units=(blk.match(/\d[\d,]*\.\d{3}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
     const nav4=(blk.match(/\d[\d,]*\.\d{4}(?!\d)/g)||[]).map(s=>parseFloat(s.replace(/,/g,'')));
-    const invR=pos[0]||0,curR=pos[1]||0;
-    const sInv=strip1(invR),sCur=strip1(curR);
-    const cc=(units[0]&&nav4[0])?Math.round(units[0]*nav4[0]*100)/100:0;   // Units x NAV = reliable Current
-    const invVars=[invR,sInv].filter(v=>v>0);
-    const curVars=[curR,sCur].filter(v=>v>0);
-    let inv=invR,cur=curR>0?curR:0,fixed=false;
-    if(cc>0){
-      const m=curVars.find(v=>Math.abs(v-cc)/cc<0.02);
-      cur=(m!=null)?m:cc;fixed=true;
-      const ig=invVars.find(iv=>signed.some(g=>Math.abs(iv+g-cur)<2));
-      if(ig!=null)inv=ig;
-      else{const c=invVars.slice().sort((a,b)=>Math.abs(a-cur)-Math.abs(b-cur));inv=(c[0]&&Math.abs(c[0]-cur)/cur<2)?c[0]:invR;}
-    }else{
-      outer:for(const g of signed){for(const iv of invVars){for(const cv of curVars){
-        if(Math.abs(iv+g-cv)<2){inv=iv;cur=cv;fixed=true;break outer;}}}}
-      if(!fixed){ // unconfirmed — keep raw values and FLAG for manual check (no silent guessing)
-        cur=curR;inv=invR;}
-    }
+    const uniq=a=>[...new Set(a.filter(v=>v>0))];
+    const invC=uniq([pos[0],strip1(pos[0]),pos[1],strip1(pos[1]),pos[2]]);
+    const curC=uniq([pos[1],strip1(pos[1]),pos[0],strip1(pos[0]),pos[2]]);
+    const gains=uniq(signed.map(x=>Math.abs(x)));
+    const cc=(units[0]&&nav4[0])?Math.round(units[0]*nav4[0]*100)/100:0;   // Units × NAV = reliable Current
+    const tol=cv=>Math.max(2,cv*0.004);
+    const gOK=(iv,cv)=>gains.some(g=>Math.abs(iv+g-cv)<2||Math.abs(iv-g-cv)<2);          // Inv ± Gain = Cur
+    const pOK=(iv,cv)=>pcts.some(p=>Math.abs(iv*(1+p/100)-cv)<tol(cv)||Math.abs(iv*(1-p/100)-cv)<tol(cv)); // Inv × (1 ± ret%) = Cur
+    let cur=0,curFixed=false;
+    if(cc>0){const m=curC.find(v=>Math.abs(v-cc)/cc<0.02);cur=(m!=null)?m:cc;curFixed=true;}
+    let inv=0,fixed=false;
+    // Score every candidate pair; accept only when at least one identity confirms it.
+    let best={s:1,iv:0,cv:0};
+    const curs=curFixed?[cur]:curC;
+    for(const cv of curs)for(const iv of invC){
+      let s=0;if(gOK(iv,cv))s+=2;if(pOK(iv,cv))s+=2;
+      const ratio=iv>0?cv/iv:0;if(ratio>0.2&&ratio<5)s+=0.5;
+      if(s>best.s)best={s,iv,cv};}
+    if(best.s>=2){inv=best.iv;cur=best.cv;fixed=true;}
+    if(!fixed&&curFixed){ // derive Invested = Cur ∓ Gain, corroborated by the return %
+      outer:for(const g of gains)for(const sg of [1,-1]){const iv=Math.round((cur-sg*g)*100)/100;
+        if(iv>0&&pOK(iv,cur)){inv=iv;fixed=true;break outer;}}}
+    if(!fixed){inv=pos[0]||0;cur=(curFixed&&cur>0)?cur:(pos[1]||0);} // unconfirmed — keep raw and FLAG
+    if(inv>0&&inv===cur&&gains.some(g=>g>2&&Math.abs(g-inv)>2))fixed=false; // Inv==Cur but a gain exists — suspicious
     out.push({name,inv,cur,units:units[0]||0,flag:!fixed});}
   const map={};
   out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
-  return Object.values(map);}
+  const rows=Object.values(map);
+  reconcileTotals(rows,_stmtTot);
+  return rows;}
 
 /* ---------- CAS PDF import (beta) ---------- */
 function ensurePdfjs(){return new Promise((res,rej)=>{if(window.pdfjsLib)return res();
@@ -266,7 +303,7 @@ async function importCAS(file){
   const parsed=parsePortfolio(text);
   if(!parsed.length){alert('Could not read fund rows from this CAS (beta). Try screenshots or manual entry — and please report the CAS format so it can be supported.');return;}
   startReview(parsed);}
-function manualEntry(){if(!ensureProfile(true))return;startReview([]);}
+function manualEntry(){if(!ensureProfile(true))return;_stmtTot=null;startReview([]);}
 
 /* ---------- review ---------- */
 function startReview(parsed){
@@ -281,9 +318,16 @@ function addEditRow(){editRows.push({name:'',inv:0,cur:0,units:0,year:'',flag:fa
 function updateEditTotals(){
   const ti=editRows.reduce((a,r)=>a+(r.inv||0),0),tc=editRows.reduce((a,r)=>a+(r.cur||0),0);
   const el=$('editTotals');if(!el)return;
-  if(ti>0||tc>0){el.classList.remove('hide');
-    el.innerHTML=`Totals so far — invested <b>${inr(ti)}</b>, current <b>${inr(tc)}</b>. Check these against the total on your statement.`;}
-  else el.classList.add('hide');}
+  if(!(ti>0||tc>0)){el.classList.add('hide');return;}
+  el.classList.remove('hide');
+  let extra=' Check these against the total on your statement.';
+  if(_stmtTot){
+    const okI=Math.abs(ti-_stmtTot.inv)<=Math.max(10,_stmtTot.inv*0.002);
+    const okC=Math.abs(tc-_stmtTot.cur)<=Math.max(10,_stmtTot.cur*0.002);
+    extra=(okI&&okC)
+      ?` <span style="color:var(--green)">✓ Matches the summary totals read from your statement (${inr(_stmtTot.inv)} / ${inr(_stmtTot.cur)}).</span>`
+      :` <span style="color:var(--amber)">⚠ Your statement's summary says invested ${inr(_stmtTot.inv)} / current ${inr(_stmtTot.cur)} — the rows don't add up to that yet. Fix the highlighted amounts before building.</span>`;}
+  el.innerHTML=`Totals so far — invested <b>${inr(ti)}</b>, current <b>${inr(tc)}</b>.${extra}`;}
 function renderEdit(){
   $('editList').innerHTML=editRows.map((r,i)=>{
     const bad=r.flag;const bord=bad?'border:1.5px solid var(--amber)':'border:1px solid var(--line)';
