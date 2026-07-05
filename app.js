@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='2.2 · build 22';
+const APP_VERSION='2.4 · build 24';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -179,29 +179,29 @@ function fetchAmfiNames(){ // official AMFI scheme list (name+code), for last-re
     throw new Error('amfi unavailable');})();
   _amfiNamesP.catch(()=>{_amfiNamesP=null;});
   return _amfiNamesP;}
-async function matchCode(name){
+async function matchCandidates(name){
   const plan=(LS.g('profile',{}).plan)||'regular';
   const nn=normFund(name),words=nn.split(' ');
   const queries=[...new Set([name,nn,words.slice(0,5).join(' '),words.slice(0,4).join(' '),words.slice(0,3).join(' '),words.slice(0,2).join(' ')])].filter(q=>q&&q.length>=6);
-  let best=null,bestAny=null;
+  const all={}; // code -> best-scored candidate (mfapi can hold duplicate codes per scheme)
   const consider=(schemeName,schemeCode)=>{
     if(!schemeName||!/growth/i.test(schemeName)||/idcw|dividend|bonus|segregated/i.test(schemeName))return;
     let s=fundSim(name,schemeName);
     const isDirect=/direct/i.test(schemeName);
     if(plan==='mixed'&&!isDirect)s+=0.02; // when unsure, lean Regular (distributor statements)
-    const cand={s,code:String(schemeCode),official:schemeName};
-    if(!bestAny||s>bestAny.s)bestAny=cand;
-    if(plan==='direct'&&!isDirect)return;
-    if(plan==='regular'&&isDirect)return;
-    if(!best||s>best.s)best=cand;};
+    const k=String(schemeCode);
+    if(!all[k]||s>all[k].s)all[k]={s,code:k,official:schemeName,isDirect};};
   for(const q of queries){
     try{const r=await fetch(SEARCH(q));const arr=await r.json();
       if(Array.isArray(arr))arr.forEach(x=>consider(x.schemeName,x.schemeCode));}catch(e){}
-    if(best&&best.s>=0.75)break;}
-  if(!(best&&best.s>=0.45)){ // last resort: score against the full official AMFI list
-    try{(await fetchAmfiNames()).forEach(x=>consider(x.name,x.code));}catch(e){}}
-  const pick=(best&&best.s>=0.45)?best:((bestAny&&bestAny.s>=0.45)?bestAny:null);
-  return pick?{code:pick.code,official:pick.official}:null;}
+    const b=Object.values(all).sort((x,y)=>y.s-x.s)[0];
+    if(b&&b.s>=0.75)break;}
+  let list=Object.values(all).filter(c=>c.s>=0.45);
+  if(!list.length){ // last resort: score against the full official AMFI list
+    try{(await fetchAmfiNames()).forEach(x=>consider(x.name,x.code));
+      list=Object.values(all).filter(c=>c.s>=0.45);}catch(e){}}
+  const conform=list.filter(c=>plan==='direct'?c.isDirect:(plan==='regular'?!c.isDirect:true));
+  return (conform.length?conform:list).sort((x,y)=>y.s-x.s).slice(0,5);}
 
 /* ---------- navigation & consent ---------- */
 function show(id){['welcome','setup','review','dash'].forEach(s=>{const el=$(s);if(el)el.classList.add('hide');});
@@ -304,7 +304,7 @@ function parsePortfolio(text){
         if(iv>0&&pOK(iv,cur)){inv=iv;fixed=true;break outer;}}}
     if(!fixed){inv=pos[0]||0;cur=(curFixed&&cur>0)?cur:(pos[1]||0);} // unconfirmed — keep raw and FLAG
     if(inv>0&&inv===cur&&gains.some(g=>g>2&&Math.abs(g-inv)>2))fixed=false; // Inv==Cur but a gain exists — suspicious
-    out.push({name,inv,cur,units:units[0]||0,flag:!fixed});}
+    out.push({name,inv,cur,units:units[0]||0,nav:nav4[0]||0,flag:!fixed});}
   const map={};
   out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
   const rows=Object.values(map);
@@ -346,14 +346,14 @@ function manualEntry(){if(!ensureProfile(true))return;_stmtTot=null;startReview(
 
 /* ---------- review ---------- */
 function startReview(parsed){
-  editRows=(parsed&&parsed.length)?parsed.map(r=>({name:r.name,inv:r.inv||0,cur:r.cur||0,units:r.units||0,year:'',flag:!!r.flag})):[{name:'',inv:0,cur:0,units:0,year:'',flag:true}];
+  editRows=(parsed&&parsed.length)?parsed.map(r=>({name:r.name,inv:r.inv||0,cur:r.cur||0,units:r.units||0,nav:r.nav||0,year:'',flag:!!r.flag})):[{name:'',inv:0,cur:0,units:0,nav:0,year:'',flag:true}];
   renderEdit();
   const nf=editRows.filter(r=>r.flag).length;
   $('dedupNote').innerHTML=(parsed&&parsed.length)?'<i>✓ deduped</i>':'';
   $('reviewTitle').textContent=(parsed&&parsed.length)?`Found ${parsed.length} funds — please verify`:'Enter your funds';
   $('matchStatus').innerHTML=nf&&parsed&&parsed.length?`<span style="color:var(--amber)">⚠ ${nf} row(s) could not be cross-checked (Invested + Gain ≠ Current) — compare the highlighted ones against your statement.</span>`:'';
   show('review');}
-function addEditRow(){editRows.push({name:'',inv:0,cur:0,units:0,year:'',flag:false});renderEdit();}
+function addEditRow(){editRows.push({name:'',inv:0,cur:0,units:0,nav:0,year:'',flag:false});renderEdit();}
 function updateEditTotals(){
   const ti=editRows.reduce((a,r)=>a+(r.inv||0),0),tc=editRows.reduce((a,r)=>a+(r.cur||0),0);
   const el=$('editTotals');if(!el)return;
@@ -387,21 +387,51 @@ function renderEdit(){
 async function saveHoldings(){
   const rows=editRows.filter(r=>r.name&&r.name.trim().length>3&&(r.cur>0||r.inv>0));
   if(!rows.length){alert('Add at least one fund with a name and a current value.');return;}
+  /* Gate: refuse to silently build on numbers that contradict the statement summary. */
+  if(_stmtTot){
+    const si=rows.reduce((a,r)=>a+(r.inv||0),0),sc=rows.reduce((a,r)=>a+(r.cur||0),0);
+    const bad=(v,t)=>t>0&&Math.abs(v-t)/t>0.005;
+    if(bad(si,_stmtTot.inv)||bad(sc,_stmtTot.cur)){
+      if(!confirm(`CHECK FIRST — your rows add to ${inr(si)} invested / ${inr(sc)} current, but the statement summary reads ${inr(_stmtTot.inv)} / ${inr(_stmtTot.cur)}.\n\nIf you build now, every figure on the dashboard will inherit this error. Fix the highlighted rows instead?\n\nTap OK to build anyway, Cancel to go back and fix.`))return;}}
   busy(true,'Matching funds to AMFI…','Finding the official NAV code for each fund.');
   const holds=[],navs=LS.g('navs',{}),dates=LS.g('navDates',{});const missNames=[];
   for(const r of rows){$('busysub').textContent=r.name;
-    const m=await matchCode(r.name);const [cat,grp]=classify(r.name);
-    let code=null,official=null,nav=0;
-    if(m){code=m.code;official=m.official;
-      const x=await getNav(code);if(x){nav=x.nav;navs[code]=x.nav;dates[code]=x.date;}}
-    else missNames.push(r.name);
+    const [cat,grp]=classify(r.name);
     const inv=r.inv||0,cur=r.cur||0;
+    const cands=await matchCandidates(r.name);
+    /* Pick the right scheme CODE, not just the right name: mfapi carries stale
+       duplicate codes for the same scheme. The statement's own Cur. NAV is a
+       fingerprint of the correct series — prefer candidates whose live NAV is
+       within 6% of it, and prefer fresh NAV series over stale ones. */
+    const fetched=[];
+    for(const c of cands){const x=await getNav(c.code);if(x)fetched.push([c,x]);}
+    const navOK=x=>!(r.nav>0)||Math.abs(x.nav-r.nav)/r.nav<=0.06;
+    const freshOK=x=>lagDays(x.date)<=15;
+    const picked=fetched.find(([c,x])=>navOK(x)&&freshOK(x))
+              ||fetched.find(([c,x])=>navOK(x))
+              ||fetched.find(([c,x])=>freshOK(x))
+              ||fetched[0]||null;
+    let code=null,official=null,nav=0,navVerified=false;
+    if(picked){const c=picked[0],x=picked[1];
+      code=c.code;official=c.official;nav=x.nav;
+      navs[code]=x.nav;dates[code]=x.date;
+      /* Live NAV is TRUSTED only when it can be verified against the statement:
+         match its printed NAV, or reproduce its Current value from its units.
+         Unverified funds display statement values instead of live maths. */
+      navVerified = r.nav>0 ? Math.abs(x.nav-r.nav)/r.nav<=0.04
+        : (r.units>0&&cur>0 ? Math.abs(r.units*x.nav-cur)/cur<=0.04
+        : (c.s>=0.85&&freshOK(x)));}
+    else missNames.push(r.name);
     /* Units: prefer what the user/statement gave us (exact). Otherwise derive
        from current value ÷ latest NAV — an approximation, flagged as such. */
     let units=0,unitsApprox=false;
     if(r.units>0)units=r.units;
     else if(nav>0&&(cur||inv)>0){units=(cur||inv)/nav;unitsApprox=true;}
-    holds.push({key:(code||'x')+Math.random().toString(36).slice(2,7),name:r.name.trim(),official,code,cat,grp,units,unitsApprox,inv,cur,year:r.year||null});}
+    /* Safety anchor: the dashboard must start at the statement's Current value.
+       If units × live NAV strays >5% (wrong units, or a doubtful scheme match),
+       re-derive units from the statement value instead. */
+    if(units>0&&nav>0&&cur>0&&Math.abs(units*nav-cur)/cur>0.05){units=cur/nav;unitsApprox=true;}
+    holds.push({key:(code||'x')+Math.random().toString(36).slice(2,7),name:r.name.trim(),official,code,cat,grp,units,unitsApprox,inv,cur,navStmt:r.nav||0,navVerified,year:r.year||null});}
   LS.s('navs',navs);LS.s('navDates',dates);LS.s('navTs',Date.now());
   busy(false);
   if(!holds.length){alert('Nothing to save. Check the fund names.');return;}
@@ -427,9 +457,20 @@ function migrateProfile(){const p=LS.g('profile',null);if(!p)return null;
   return p;}
 function renderDash(holds,navs,dates,live){
   const p=migrateProfile()||{age:36,horizon:'5-7',band:'moderate',plan:'regular'};
+  /* Migrate holdings saved by older builds: decide navVerified by whether the
+     live NAV can reproduce the statement's Current value from the units. */
+  let dirty=false;
+  holds.forEach(h=>{if(h.navVerified===undefined){
+    const nav=h.code?(navs[h.code]||0):0;
+    h.navVerified=(nav>0&&h.units>0&&h.cur>0)?(Math.abs(h.units*nav-h.cur)/h.cur<=0.05):false;
+    dirty=true;}});
+  if(dirty)LS.s('holdings',holds);
   let ti=0,tc=0;
-  let rows=holds.map(h=>{const nav=h.code?(navs[h.code]||0):0;const cur=nav>0&&h.units>0?h.units*nav:(h.cur||0);
-    ti+=h.inv;tc+=cur;return Object.assign({},h,{nav,cur,pl:cur-h.inv,date:h.code?dates[h.code]:null});});
+  /* Statement values are ground truth. Live NAV maths applies ONLY to verified funds. */
+  let rows=holds.map(h=>{const nav=h.code?(navs[h.code]||0):0;
+    const isLive=!!(h.navVerified&&nav>0&&h.units>0);
+    const cur=isLive?h.units*nav:(h.cur||0);
+    ti+=h.inv;tc+=cur;return Object.assign({},h,{nav,cur,isLive,pl:cur-h.inv,date:h.code?dates[h.code]:null});});
   rows=verdicts(rows,tc||1,p);
   window._rows=rows;window._tot=tc;window._p=p;
   const pl=tc-ti,metal=rows.filter(r=>r.grp==='Metal').reduce((a,b)=>a+b.cur,0);
@@ -443,12 +484,13 @@ function renderDash(holds,navs,dates,live){
   const syncTxt=syncedAt?new Date(syncedAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
   const ageMin=syncedAt?Math.floor((Date.now()-syncedAt)/60000):0;
   const ageTxt=ageMin<1?'just now':(ageMin<60?ageMin+' min ago':Math.round(ageMin/60)+' hr ago');
-  const nLive=holds.filter(h=>h.code).length;
-  $('status').innerHTML = live<0
+  const nVer=rows.filter(r=>r.isLive).length,nStmt=rows.length-nVer;
+  const stmtNote=nStmt>0?` · ${nStmt} fund(s) on statement values`:'';
+  $('status').innerHTML = (live<0
     ? `⏱ Synced ${syncTxt} (${ageTxt}, cached) · tap ↻ for live`
     : live>0
-      ? `✓ Live · synced ${syncTxt} · ${live}/${nLive} funds`
-      : `⚠ Offline · last synced ${syncTxt}`;
+      ? `✓ Live · synced ${syncTxt} · ${nVer}/${rows.length} funds`
+      : `⚠ Offline · last synced ${syncTxt}`)+stmtNote;
   $('staleCtx').innerHTML=ctxStale()?`<div class="banner warn">⚠ The built-in market commentary is ${ctxAgeDays()} days old (as of ${CTX.asof}) and may be outdated. Treat category notes as historical context, or refresh them via the News-aware signals below.</div>`:'';
   const g=f=>rows.filter(f).reduce((a,b)=>a+b.cur,0);
   const eq=g(r=>r.grp==='Equity'),hy=g(r=>r.grp==='Hybrid'),go=metal,de=g(r=>r.grp==='Debt');
@@ -634,12 +676,17 @@ function drawHold(){
     b.textContent=(f==='all'?'All':VLAB[f])+` (${n})`;b.classList.toggle('on',f===HOLDF);});
   $('holdList').innerHTML=r.length?r.map(h=>{
     const lag=lagDays(h.date);
-    const dtxt=h.code?(h.date?(lag>4?`<span class="lag">NAV ${esc(h.date)} ⚠</span>`:`NAV ${esc(h.date)}`):'no live NAV'):'<span class="lag">not matched — values won\'t update ⚠</span>';
+    const dtxt=!h.code
+      ?'<span class="lag">not matched — values won\'t update ⚠</span>'
+      :(h.isLive
+        ?(lag>4?`<span class="lag">NAV ${h.nav.toFixed(4)} · ${esc(h.date)} ⚠</span>`:`NAV ${h.nav.toFixed(4)} · ${esc(h.date)} ✓`)
+        :'<span class="lag">statement value — live NAV unverified ⚠</span>');
     const approx=h.unitsApprox?' · units approx':'';
     const newsln=h.news?`<div class="why" style="color:var(--blue)">${h.news}</div>`:'';
     const offln=h.official&&h.official.toLowerCase().slice(0,18)!==h.name.toLowerCase().slice(0,18)?`<div class="fsub">matched: ${esc(h.official)}</div>`:'';
     return `<div class="row"><div style="flex:1"><div class="fname">${esc(h.name)}</div>${offln}
-      <div class="fsub">${inr(h.cur)} · ${h.pl<0?'−':'+'}${inr(Math.abs(h.pl))} · ${fundReturnTxt(h)} · ${dtxt}${approx}</div>
+      <div class="fsub">${inr(h.inv)} → ${inr(h.cur)} (${h.pl<0?'−':'+'}${inr(Math.abs(h.pl))}) · ${fundReturnTxt(h)}</div>
+      <div class="fsub">${dtxt}${approx}</div>
       <div class="why">${h.why}</div>${newsln}</div><span class="tag t-${h.verdict}">${h.vlabel}</span></div>`;}).join(''):'<div class="note" style="padding:8px 0">No funds in this group.</div>';}
 document.querySelectorAll('#holdFilters button').forEach(b=>b.onclick=()=>{HOLDF=b.dataset.f;drawHold();});
 
