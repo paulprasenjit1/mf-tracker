@@ -245,7 +245,12 @@ function parseStmtTotals(text){
   if(ints.length>=2&&ints[1]/ints[0]>0.5&&ints[1]/ints[0]<2)return{inv:ints[0],cur:ints[1]};
   return null;}
 /* If row sums drift from the statement totals, greedily undo "₹ read as 3/7"
-   leading-digit errors on whichever rows bring the sums back in line. */
+   leading-digit errors on whichever rows bring the sums back in line.
+   IMPORTANT: only rewrite rows that are NOT already self-confirmed (flag set).
+   A row whose own gain and return% reproduce its Current value is trustworthy —
+   forcing it to match a mis-OCR'd summary total (e.g. ₹6,31,369) would corrupt
+   a correct invested amount. When every row is self-consistent, the summary is
+   the suspect, so we leave the rows untouched. */
 function reconcileTotals(rows,tot){
   if(!tot||!rows.length)return;
   [['inv',tot.inv],['cur',tot.cur]].forEach(([fld,target])=>{
@@ -254,7 +259,7 @@ function reconcileTotals(rows,tot){
     let sum=rows.reduce((a,r)=>a+(r[fld]||0),0),guard=0;
     while(Math.abs(sum-target)>tolr&&guard++<=rows.length){
       let bestR=null,bestV=0,bestGain=1;
-      rows.forEach(r=>{const s=strip1(r[fld]);if(s>0){const ns=sum-r[fld]+s;
+      rows.forEach(r=>{if(!r.flag)return;const s=strip1(r[fld]);if(s>0){const ns=sum-r[fld]+s;
         const gain=Math.abs(sum-target)-Math.abs(ns-target);
         if(gain>bestGain){bestGain=gain;bestR=r;bestV=s;}}});
       if(!bestR)break;
