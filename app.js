@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='2.5 · build 25';
+const APP_VERSION='2.7 · build 27';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -309,6 +309,15 @@ function parsePortfolio(text){
         if(iv>0&&pOK(iv,cur)){inv=iv;fixed=true;break outer;}}}
     if(!fixed){inv=pos[0]||0;cur=(curFixed&&cur>0)?cur:(pos[1]||0);} // unconfirmed — keep raw and FLAG
     if(inv>0&&inv===cur&&gains.some(g=>g>2&&Math.abs(g-inv)>2))fixed=false; // Inv==Cur but a gain exists — suspicious
+    /* Narrow rescue (does NOT override a legible Invested): only when the parsed
+       Invested looks like the Current value with a dropped leading digit
+       (strip1(Cur)) — the specific OCR failure seen on HDFC Gold ETF FoF
+       (₹205.97 vs ₹3,999.80) — recover it from Cur and the printed Abs return %.
+       Guarded so it can never touch a row whose Invested already checks out. */
+    if(curFixed&&cur>0&&pcts.length&&inv>0&&Math.abs(inv-strip1(cur))<1&&!gOK(inv,cur)&&!pOK(inv,cur)){
+      const p=pcts[0]; // Abs return is printed before Ann
+      const iv=Math.round(cur/(1+p/100)*100)/100;
+      if(iv>0&&cur/iv>0.2&&cur/iv<5){inv=iv;fixed=false;}}
     out.push({name,inv,cur,units:units[0]||0,nav:nav4[0]||0,flag:!fixed});}
   const map={};
   out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
