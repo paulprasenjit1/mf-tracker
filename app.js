@@ -2,8 +2,8 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='2.9 · build 29';
-const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
+const APP_VERSION='3.0 · build 30';
+const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}`,c=>`https://api.mfapi.in/mf/${c}/latest`]; // full history first: also yields yesterday's NAV for day-change
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
 const inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
@@ -86,7 +86,9 @@ const SMCAP={conservative:12,moderate:20,balanced:27,growth:33};
 
 /* ---------- verdicts (educational observations, not advice) ----------
    ranks: 2 = ok (On track), 1 = watch, 0 = review */
-const VLAB={ok:'On track',watch:'Watch',review:'Review'};
+const VLAB_EN={ok:'On track',watch:'Watch',review:'Review'};
+const VLAB_HI={ok:'ठीक है',watch:'नज़र रखें',review:'समीक्षा करें'};
+const VLAB=new Proxy({},{get:(_,k)=>((LS.g('lang','en')==='hi'?VLAB_HI:VLAB_EN)[k])});
 const VKEY={2:'ok',1:'watch',0:'review'};
 function verdicts(holds,total,p){
   const t=targets(p),band=bandOf(p);
@@ -144,9 +146,15 @@ function fetchAmfiMap(){ // AMFI NAVAll fallback (one download, cached for the s
 async function getNav(code){
   if(!code)return null;
   for(const mk of NAV_SRCS){try{const r=await fetch(mk(code),{cache:'no-store'});const j=await r.json();
-    const d=j.data&&j.data[0];if(d&&parseFloat(d.nav)>0)return{nav:parseFloat(d.nav),date:d.date};}catch(e){}}
+    const d=j.data&&j.data[0];if(d&&parseFloat(d.nav)>0){
+      const p=j.data[1]; // previous trading day, when the full-history endpoint answered
+      return{nav:parseFloat(d.nav),date:d.date,prev:p&&parseFloat(p.nav)>0?parseFloat(p.nav):0};}}catch(e){}}
   try{const map=await fetchAmfiMap();if(map[code])return map[code];}catch(e){}
   return null;}
+/* Full NAV history for one scheme (used for benchmark comparison). */
+async function getNavHistory(code){
+  try{const r=await fetch(`https://api.mfapi.in/mf/${code}`,{cache:'no-store'});const j=await r.json();
+    return Array.isArray(j.data)?j.data:null;}catch(e){return null;}}
 /* Plan-aware AMFI matching with fuzzy name scoring.
    Handles statement short-forms: "FoF" vs "Fund of Fund", "&" vs "and",
    and renamed schemes (e.g. "Nippon India Growth Mid Cap Fund" vs AMFI's
@@ -231,20 +239,25 @@ async function onBuild(){
      Default page segmentation splits the holdings cards into COLUMN blocks,
      dumping every Gain/Loss and return % detached at the end of the text — the
      parser then never sees them next to the fund name and rows fail to parse. */
-  let text='';
+  let text='';_lowConf=[];
   try{
     const worker=await Tesseract.createWorker('eng');
     await worker.setParameters({tessedit_pageseg_mode:'6'});
     for(let i=0;i<files.length;i++){$('busysub').textContent=`Image ${i+1} of ${files.length}…`;
       let src=files[i];try{src=await prepImage(files[i]);}catch(e){}
-      try{const r=await worker.recognize(src);text+='\n'+r.data.text;}catch(e){}}
+      try{const r=await worker.recognize(src);
+        text+='\n@@IMG '+(i+1)+'@@\n'+r.data.text;
+        (r.data.lines||[]).forEach(l=>{const t=(l.text||'').trim();
+          if(l.confidence<70&&t.length>5&&/\d/.test(t))_lowConf.push(t);});
+      }catch(e){}}
     await worker.terminate();
   }catch(e){ // fallback: old path with default segmentation
     for(let i=0;i<files.length;i++){$('busysub').textContent=`Image ${i+1} of ${files.length}…`;
-      try{const r=await Tesseract.recognize(files[i],'eng');text+='\n'+r.data.text;}catch(e2){}}}
+      try{const r=await Tesseract.recognize(files[i],'eng');text+='\n@@IMG '+(i+1)+'@@\n'+r.data.text;}catch(e2){}}}
   busy(false);
   try{LS.s('lastOCR',text.slice(0,60000));}catch(e){} // debug: raw scan text
   startReview(parsePortfolio(text));}
+let _lowConf=[];
 /* Upscale to ~2200px wide + grayscale before OCR — phone screenshots at native
    width are often too small for Tesseract to read digits reliably. */
 function prepImage(file){return new Promise((res,rej)=>{const img=new Image();
@@ -294,7 +307,9 @@ function reconcileTotals(rows,tot){
 function parsePortfolio(text){
   _stmtTot=parseStmtTotals(text);
   const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);const out=[];
-  const isName=l=>/[A-Za-z]{4,}/.test(l)&&/(fund|etf|flexi|index|nifty|psu|multi[- ]?asset|bond|gilt|debt)/i.test(l)&&!/^(inv\.|inv\s+amt|cur\.|bal\s*units|abs\.|unr\.|as on|scheme|investor|net asset|folio|isin|registrar|nominee|total)/i.test(l);
+  const imgOf=[];let curImg=0; // which screenshot each line came from
+  lines.forEach((l,ix)=>{const m=l.match(/^@@IMG (\d+)@@$/);if(m)curImg=+m[1];imgOf[ix]=curImg;});
+  const isName=l=>/[A-Za-z]{4,}/.test(l)&&/(fund|etf|flexi|index|nifty|psu|multi[- ]?asset|bond|gilt|debt)/i.test(l)&&!/^(inv\.|inv\s+amt|cur\.|bal\s*units|abs\.|unr\.|as on|scheme|investor|net asset|folio|isin|registrar|nominee|total|@@img)/i.test(l);
   for(let i=0;i<lines.length;i++){if(!isName(lines[i]))continue;
     let name=lines[i]
       .replace(/\s*[-–—]\s*(regular|direct)?\s*(plan)?\s*(gr(owth)?)\b.*$/i,'')
@@ -345,7 +360,11 @@ function parsePortfolio(text){
       const p=pcts[0]; // Abs return is printed before Ann
       const iv=Math.round(cur/(1+p/100)*100)/100;
       if(iv>0&&cur/iv>0.2&&cur/iv<5){inv=iv;fixed=false;}}
-    out.push({name,inv,cur,units:units[0]||0,nav:nav4[0]||0,flag:!fixed});}
+    // Buy year: only from a date-shaped token (e.g. 12-Mar-2023 / 12/03/2023), as in CAS transaction rows.
+    const ym=blk0.match(/\b\d{1,2}[-\/]([A-Za-z]{3}|\d{1,2})[-\/](20\d{2})\b/);
+    // Low OCR confidence: Tesseract wasn't sure about a numeric line in this block.
+    const lowconf=_lowConf.some(t=>blk0.includes(t));
+    out.push({name,inv,cur,units:units[0]||0,nav:nav4[0]||0,flag:!fixed||lowconf,lowconf,img:imgOf[i]||0,year:ym?+ym[2]:''});}
   const map={};
   out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
   const rows=Object.values(map);
@@ -387,15 +406,38 @@ function manualEntry(){if(!ensureProfile(true))return;_stmtTot=null;startReview(
 
 /* ---------- review ---------- */
 function startReview(parsed){
-  editRows=(parsed&&parsed.length)?parsed.map(r=>({name:r.name,inv:r.inv||0,cur:r.cur||0,units:r.units||0,nav:r.nav||0,year:'',flag:!!r.flag})):[{name:'',inv:0,cur:0,units:0,nav:0,year:'',flag:true}];
+  editRows=(parsed&&parsed.length)?parsed.map(r=>({name:r.name,inv:r.inv||0,cur:r.cur||0,units:r.units||0,nav:r.nav||0,year:r.year||'',flag:!!r.flag,img:r.img||0,lowconf:!!r.lowconf})):[{name:'',inv:0,cur:0,units:0,nav:0,year:'',flag:true}];
   renderEdit();
   const nf=editRows.filter(r=>r.flag).length;
   $('dedupNote').innerHTML=((parsed&&parsed.length)?'<i>✓ deduped</i> ':'')+
     (LS.g('lastOCR','')?'<a href="#" style="font-size:11px" onclick="navigator.clipboard.writeText(LS.g(\'lastOCR\',\'\')).then(()=>alert(\'Raw scan text copied — paste it to the developer to improve reading.\'));return false">copy scan text</a>':'');
-  $('reviewTitle').textContent=(parsed&&parsed.length)?`Found ${parsed.length} funds — please verify`:'Enter your funds';
-  $('matchStatus').innerHTML=nf&&parsed&&parsed.length?`<span style="color:var(--amber)">⚠ ${nf} row(s) could not be cross-checked (Invested + Gain ≠ Current) — compare the highlighted ones against your statement.</span>`:'';
+  const L=(en,hi)=>LS.g('lang','en')==='hi'?hi:en;
+  $('reviewTitle').textContent=(parsed&&parsed.length)?L(`Found ${parsed.length} funds — please verify`,`${parsed.length} फंड मिले — कृपया जाँचें`):L('Enter your funds','अपने फंड भरें');
+  $('matchStatus').innerHTML=nf&&parsed&&parsed.length?`<span style="color:var(--amber)">${L(`⚠ ${nf} row(s) could not be cross-checked (Invested + Gain ≠ Current) — compare the highlighted ones against your statement.`,`⚠ ${nf} पंक्ति(याँ) क्रॉस-चेक नहीं हो सकीं — हाइलाइट की गई राशियाँ अपने स्टेटमेंट से मिलाएँ।`)}</span>`:'';
   show('review');}
 function addEditRow(){editRows.push({name:'',inv:0,cur:0,units:0,nav:0,year:'',flag:false});renderEdit();}
+/* Per-row rescan: user crops/screenshots the single fund card and re-reads only that row. */
+let _rescanIdx=-1;
+function rescanRow(i){_rescanIdx=i;const f=$('rescanFile');if(f)f.click();}
+async function doRescan(file){
+  if(_rescanIdx<0||!file)return;
+  busy(true,'Re-reading this fund…','');
+  try{await ensureTesseract();
+    const worker=await Tesseract.createWorker('eng');
+    await worker.setParameters({tessedit_pageseg_mode:'6'});
+    let src=file;try{src=await prepImage(file);}catch(e){}
+    const r=await worker.recognize(src);await worker.terminate();
+    const keepTot=_stmtTot; // parsePortfolio would overwrite the statement summary
+    const rows=parsePortfolio('\n@@IMG 1@@\n'+r.data.text);
+    _stmtTot=keepTot;
+    busy(false);
+    if(!rows.length){alert('Could not read a fund from that image — crop tighter around one fund card and try again.');return;}
+    const p=rows[0],t=editRows[_rescanIdx];
+    t.name=p.name||t.name;t.inv=p.inv||t.inv;t.cur=p.cur||t.cur;
+    t.units=p.units||t.units;t.nav=p.nav||t.nav;t.year=p.year||t.year;t.flag=!!p.flag;t.lowconf=!!p.lowconf;
+    renderEdit();
+  }catch(e){busy(false);alert('Rescan failed — try again.');}
+  _rescanIdx=-1;}
 function updateEditTotals(){
   const ti=editRows.reduce((a,r)=>a+(r.inv||0),0),tc=editRows.reduce((a,r)=>a+(r.cur||0),0);
   const el=$('editTotals');if(!el)return;
@@ -413,7 +455,10 @@ function renderEdit(){
   $('editList').innerHTML=editRows.map((r,i)=>{
     const bad=r.flag;const bord=bad?'border:1.5px solid var(--amber)':'border:1px solid var(--line)';
     return `<div style="margin-bottom:12px;border-bottom:1px solid var(--line);padding-bottom:9px">
-    ${bad?'<div style="font-size:11px;color:var(--amber);margin-bottom:4px">⚠ check the amounts below against your statement</div>':''}
+    ${bad?`<div style="font-size:11px;color:var(--amber);margin-bottom:4px">⚠ check the amounts below against your statement${r.lowconf?' (the reader was unsure about this one)':''}</div>`:''}
+    ${(r.img||bad)?`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <span class="small" style="font-size:10.5px">${r.img?'from screenshot '+r.img:''}</span>
+      <a href="#" class="small" style="font-size:10.5px" onclick="rescanRow(${i});return false">📷 rescan this fund</a></div>`:''}
     <input value="${esc(r.name)}" placeholder="Fund name" aria-label="Fund name" oninput="editRows[${i}].name=this.value">
     <div class="editrow" style="margin-top:7px">
       <input type="number" inputmode="numeric" value="${r.inv||''}" placeholder="Invested ₹" aria-label="Invested amount" style="${bord}" oninput="editRows[${i}].inv=parseFloat(this.value)||0;editRows[${i}].flag=false;this.style.border='1px solid var(--line)';updateEditTotals()">
@@ -489,9 +534,9 @@ async function refresh(force){
   const navs=LS.g('navs',{}),dates=LS.g('navDates',{});
   const fresh=(Date.now()-(LS.g('navTs',0))<30*60*1000)&&holds.every(h=>!h.code||navs[h.code]);
   if(!force&&fresh){renderDash(holds,navs,dates,-1);return;}
-  $('status').textContent='Refreshing live NAVs…';let live=0;
-  await Promise.all(holds.filter(h=>h.code).map(async h=>{const x=await getNav(h.code);if(x){navs[h.code]=x.nav;dates[h.code]=x.date;live++;}}));
-  LS.s('navs',navs);LS.s('navDates',dates);LS.s('navTs',Date.now());
+  $('status').textContent='Refreshing live NAVs…';let live=0;const prevs=LS.g('navPrev',{});
+  await Promise.all(holds.filter(h=>h.code).map(async h=>{const x=await getNav(h.code);if(x){navs[h.code]=x.nav;dates[h.code]=x.date;if(x.prev)prevs[h.code]=x.prev;live++;}}));
+  LS.s('navs',navs);LS.s('navDates',dates);LS.s('navPrev',prevs);LS.s('navTs',Date.now());
   renderDash(holds,navs,dates,live);}
 
 function migrateProfile(){const p=LS.g('profile',null);if(!p)return null;
@@ -509,10 +554,13 @@ function renderDash(holds,navs,dates,live){
   if(dirty)LS.s('holdings',holds);
   let ti=0,tc=0;
   /* Statement values are ground truth. Live NAV maths applies ONLY to verified funds. */
+  const prevs=LS.g('navPrev',{});
   let rows=holds.map(h=>{const nav=h.code?(navs[h.code]||0):0;
     const isLive=!!(h.navVerified&&nav>0&&h.units>0);
     const cur=isLive?h.units*nav:(h.cur||0);
-    ti+=h.inv;tc+=cur;return Object.assign({},h,{nav,cur,isLive,pl:cur-h.inv,date:h.code?dates[h.code]:null});});
+    const pv=h.code?(prevs[h.code]||0):0;
+    const dayCh=(isLive&&pv>0)?(nav-pv)/pv*100:null; // 1-day NAV change
+    ti+=h.inv;tc+=cur;return Object.assign({},h,{nav,cur,isLive,pl:cur-h.inv,date:h.code?dates[h.code]:null,dayCh});});
   rows=verdicts(rows,tc||1,p);
   window._rows=rows;window._tot=tc;window._p=p;
   const pl=tc-ti,metal=rows.filter(r=>r.grp==='Metal').reduce((a,b)=>a+b.cur,0);
@@ -540,13 +588,14 @@ function renderDash(holds,navs,dates,live){
   $('allocbar').innerHTML=segs.map(s=>`<span style="width:${s[0]/(tc||1)*100}%;background:${s[1]}"></span>`).join('');
   $('alloclegend').textContent=segs.map(s=>`${s[2]} ${(s[0]/(tc||1)*100).toFixed(0)}%`).join(' · ');
   const t=targets(p);
-  $('allocAdvice').innerHTML=`At ${p.age}, ${esc(p.horizon)} yrs, ${BANDS[bandOf(p)].toLowerCase()} profile: a common reference mix is <b>${t.equity}% equity / ${t.hybrid}% hybrid / ${t.gold}% gold / ${t.debt}% debt</b>. You're at ${(eq/(tc||1)*100).toFixed(0)}% equity, ${(go/(tc||1)*100).toFixed(0)}% gold/silver.`;
+  $('allocAdvice').innerHTML=`At ${p.age}, ${esc(p.horizon)} yrs, ${BANDS[bandOf(p)].toLowerCase()} profile: a common reference mix is <b>${t.equity}% equity / ${t.hybrid}% hybrid / ${t.gold}% gold / ${t.debt}% debt</b>. You're at ${(eq/(tc||1)*100).toFixed(0)}% equity, ${(go/(tc||1)*100).toFixed(0)}% gold/silver.`+rebalanceNote({equity:eq,hybrid:hy,gold:go,debt:de},t,tc);
   // projection (as a RANGE, not a single promise)
   const yrs=HZYRS[p.horizon]||6,r=blendedReturn(t),rLo=Math.max(0.02,r-0.025),rHi=r+0.025;
   window._hrows=rows.slice().sort((a,b)=>b.cur-a.cur);
   drawHold();
   const ins=computeInsights(rows,p,tc,t);
-  $('insights').innerHTML='<ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px">'+ins.map(x=>`<li style="margin-bottom:6px">${x}</li>`).join('')+'</ul>';
+  $('insights').innerHTML='<div id="benchNote" class="note" style="margin-bottom:8px"></div><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px">'+ins.map(x=>`<li style="margin-bottom:6px">${x}</li>`).join('')+'</ul>';
+  loadBenchmark(rows); // async, fills #benchNote when done
   updateSigStatus();
   loadNews();
   // history + trend (with projection tail)
@@ -576,6 +625,64 @@ function renderDash(holds,navs,dates,live){
   if($('calAmt').value)planCal();
   show('dash');}
 
+/* Rebalancing illustration: concrete "shift ₹X from over-weight to under-weight"
+   pairs vs the reference mix. Educational — exit loads and tax apply to real moves. */
+function rebalanceNote(act,t,tc){
+  if(!(tc>0))return '';
+  const names={equity:'Equity',hybrid:'Hybrid',gold:'Gold/Silver',debt:'Debt'};
+  const over=[],under=[];
+  Object.keys(names).forEach(k=>{
+    const diff=act[k]-tc*t[k]/100; // ₹ above (+) or below (−) target
+    if(diff>tc*0.04)over.push({k,amt:diff});
+    if(diff<-tc*0.04)under.push({k,amt:-diff});});
+  if(!over.length||!under.length)return '';
+  over.sort((a,b)=>b.amt-a.amt);under.sort((a,b)=>b.amt-a.amt);
+  const moves=[];let oi=0,ui=0;
+  while(oi<over.length&&ui<under.length&&moves.length<3){
+    const m=Math.min(over[oi].amt,under[ui].amt);
+    if(m>tc*0.02)moves.push(`~${inr(Math.round(m/1000)*1000)} from ${names[over[oi].k]} → ${names[under[ui].k]}`);
+    if(over[oi].amt<=under[ui].amt){under[ui].amt-=over[oi].amt;oi++;}else{over[oi].amt-=under[ui].amt;ui++;}}
+  if(!moves.length)return '';
+  return `<div style="margin-top:7px">⚖️ <b>To move toward that mix:</b> ${moves.join('; ')}. <span style="color:var(--muted)">Illustration only — real switches can trigger exit loads and capital-gains tax; new money is often the gentler way to rebalance. Confirm with a registered adviser.</span></div>`;}
+/* Portfolio XIRR-style annualised return from buy years (lump-sum approximation,
+   each fund assumed bought mid-year). Solved by bisection. */
+function portfolioAnnualised(rows){
+  const dated=rows.filter(r=>r.year&&r.inv>0&&r.cur>0&&r.year>2000&&r.year<=new Date().getFullYear());
+  if(!dated.length)return null;
+  const covInv=dated.reduce((a,r)=>a+r.inv,0),totInv=rows.reduce((a,r)=>a+r.inv,0);
+  if(covInv<totInv*0.5)return null; // not enough coverage to be meaningful
+  const yrsOf=r=>Math.max(0.25,(Date.now()-new Date(r.year,6,1).getTime())/(365.25*864e5));
+  const f=rate=>dated.reduce((a,r)=>a+r.inv*Math.pow(1+rate,yrsOf(r)),0)-dated.reduce((a,r)=>a+r.cur,0);
+  let lo=-0.9,hi=2;if(f(lo)*f(hi)>0)return null;
+  for(let i=0;i<80;i++){const mid=(lo+hi)/2;(f(lo)*f(mid)<=0)?hi=mid:lo=mid;}
+  return{rate:(lo+hi)/2,coverPct:covInv/totInv*100};}
+/* Benchmark: how a plain Nifty 50 index fund did over roughly the same period. */
+async function loadBenchmark(rows){
+  const el=$('benchNote');if(!el)return;
+  const dated=rows.filter(r=>r.year&&r.year>2000);
+  if(!dated.length){el.innerHTML='<span style="color:var(--muted)">Add buy years on the review screen (📷 Update) to compare your returns with a Nifty 50 index fund.</span>';return;}
+  const y0=Math.min(...dated.map(r=>r.year));
+  try{
+    let code=LS.g('benchCode',null);
+    if(!code){const r=await fetch(SEARCH('UTI Nifty 50 Index Fund'));const arr=await r.json();
+      const c=(arr||[]).find(x=>/uti nifty 50 index/i.test(x.schemeName)&&/growth/i.test(x.schemeName)&&!/idcw|dividend/i.test(x.schemeName));
+      if(c){code=String(c.schemeCode);LS.s('benchCode',code);}}
+    if(!code)return;
+    const hist=await getNavHistory(code);if(!hist||!hist.length)return;
+    const latest=parseFloat(hist[0].nav);
+    const tgt=new Date(y0,6,1).getTime();
+    let past=null; // hist is newest-first, dates dd-mm-yyyy
+    for(const d of hist){const m=d.date.match(/(\d{2})-(\d{2})-(\d{4})/);if(!m)continue;
+      const ts=new Date(+m[3],+m[2]-1,+m[1]).getTime();
+      if(ts<=tgt){past=parseFloat(d.nav);break;}past=parseFloat(d.nav);}
+    if(!(past>0&&latest>0))return;
+    const yrs=Math.max(0.5,(Date.now()-tgt)/(365.25*864e5));
+    const cagr=(Math.pow(latest/past,1/yrs)-1)*100;
+    const mine=portfolioAnnualised(rows);
+    el.innerHTML=`📏 <b>Benchmark:</b> a plain Nifty 50 index fund returned ≈<b>${cagr.toFixed(1)}%/yr</b> since ${y0}`+
+      (mine?` — your portfolio ≈<b>${(mine.rate*100).toFixed(1)}%/yr</b> over the same period (buy-year approximation, ${mine.coverPct.toFixed(0)}% of money covered).`:'.')+
+      ` <span style="color:var(--muted)">Different risk levels — context, not a scorecard.</span>`;
+  }catch(e){}}
 /* Educational observations: the things a careful reviewer checks — concentration,
    fund-house overload, small/mid exposure vs profile, allocation gaps, cost, tax. */
 function computeInsights(rows,p,tc,t){
@@ -590,6 +697,13 @@ function computeInsights(rows,p,tc,t){
     const up=tilts.filter(([,v])=>v.bias>0).map(([k])=>k),dn=tilts.filter(([,v])=>v.bias<0).map(([k])=>k);
     if(up.length||dn.length)ins.push(`<b>News tilt applied:</b> ${up.length?'favourable — '+up.join(', '):''}${up.length&&dn.length?'; ':''}${dn.length?'cautious — '+dn.join(', '):''}. Tags above reflect these (one notch max, never into Review).`);}
   if(pct(metal)>t.gold+5)ins.push(`<b>Gold/silver is ${pct(metal).toFixed(0)}%</b> vs a ~${t.gold}% reference. Most long-term investors keep metals as a small hedge, not a core position.`);
+  /* Overlap: several funds in the same category mostly own the same assets. */
+  const byCat2={};rows.forEach(r=>{(byCat2[r.cat]=byCat2[r.cat]||[]).push(r);});
+  Object.entries(byCat2).filter(([,a])=>a.length>1).forEach(([cat,a])=>{
+    const w=pct(a.reduce((x,y)=>x+y.cur,0));
+    ins.push(`<b>${a.length} ${esc(cat)} funds = ${w.toFixed(0)}%</b> of the portfolio (${a.map(x=>esc(x.name.split(' ').slice(0,2).join(' '))).join(', ')}) — they largely overlap; one per category is usually enough.`);});
+  const ann=portfolioAnnualised(rows);
+  if(ann)ins.push(`<b>Your annualised return ≈ ${(ann.rate*100).toFixed(1)}%/yr</b> (from the buy years you provided, covering ${ann.coverPct.toFixed(0)}% of invested money; lump-sum approximation, not exact XIRR).`);
   const sm=grp(r=>r.cat==='Small Cap'||r.cat==='Mid Cap'),cap=SMCAP[band]||22;
   if(pct(sm)>cap)ins.push(`<b>Small + mid cap is ${pct(sm).toFixed(0)}%</b> — on the high side for a ${BANDS[band].toLowerCase()} profile (~${cap}% is a common ceiling). Holding is fine; adding more increases the swings.`);
   if(pct(de)<3&&t.debt>=8)ins.push(`<b>Almost no debt allocation</b> — a short-duration or corporate-bond fund (~${t.debt}%) is how portfolios usually cushion equity falls. Something to ask your adviser about.`);
@@ -724,11 +838,12 @@ function drawHold(){
         ?(lag>4?`<span class="lag">NAV ${h.nav.toFixed(4)} · ${esc(h.date)} ⚠</span>`:`NAV ${h.nav.toFixed(4)} · ${esc(h.date)} ✓`)
         :'<span class="lag">statement value — live NAV unverified ⚠</span>');
     const approx=h.unitsApprox?' · units approx':'';
+    const day=(h.dayCh!=null&&isFinite(h.dayCh))?` · <span style="color:${h.dayCh<0?'var(--red)':'var(--green)'}">${h.dayCh<0?'▼':'▲'}${Math.abs(h.dayCh).toFixed(2)}% today</span>`:'';
     const newsln=h.news?`<div class="why" style="color:var(--blue)">${h.news}</div>`:'';
     const offln=h.official&&h.official.toLowerCase().slice(0,18)!==h.name.toLowerCase().slice(0,18)?`<div class="fsub">matched: ${esc(h.official)}</div>`:'';
     return `<div class="row"><div style="flex:1"><div class="fname">${esc(h.name)}</div>${offln}
       <div class="fsub">${inr(h.inv)} → ${inr(h.cur)} (${h.pl<0?'−':'+'}${inr(Math.abs(h.pl))}) · ${fundReturnTxt(h)}</div>
-      <div class="fsub">${dtxt}${approx}</div>
+      <div class="fsub">${dtxt}${approx}${day}</div>
       <div class="why">${h.why}</div>${newsln}</div><span class="tag t-${h.verdict}">${h.vlabel}</span></div>`;}).join(''):'<div class="note" style="padding:8px 0">No funds in this group.</div>';}
 document.querySelectorAll('#holdFilters button').forEach(b=>b.onclick=()=>{HOLDF=b.dataset.f;drawHold();});
 
@@ -863,6 +978,22 @@ function importData(file){
   }catch(e){alert('That file doesn\'t look like an MF Tracker backup.');}};
   rd.readAsText(file);}
 
+/* CSV export — opens in Excel/Sheets. BOM so Excel reads the ₹-free UTF-8 cleanly. */
+function exportCSV(){
+  const rows=window._rows||LS.g('holdings',[]);
+  if(!rows.length){$('dataMsg').textContent='Nothing to export yet.';return;}
+  const q=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const head=['Fund','Category','Invested (INR)','Current (INR)','Gain/Loss (INR)','Units','NAV','NAV date','Buy year','Status'];
+  const lines=rows.map(r=>[q(r.name),q(r.cat||''),Math.round(r.inv||0),Math.round(r.cur||0),
+    Math.round((r.cur||0)-(r.inv||0)),r.units?r.units.toFixed(3):'',r.nav?r.nav.toFixed(4):'',q(r.date||''),r.year||'',q(r.vlabel||'')].join(','));
+  const ti=rows.reduce((a,r)=>a+(r.inv||0),0),tc=rows.reduce((a,r)=>a+(r.cur||0),0);
+  lines.push(['"TOTAL"','',Math.round(ti),Math.round(tc),Math.round(tc-ti),'','','','',''].join(','));
+  const blob=new Blob(['﻿'+head.join(',')+'\r\n'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='mf-tracker-holdings-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+  $('dataMsg').innerHTML='<span style="color:var(--green)">✓ CSV saved — open it in Excel or Google Sheets.</span>';}
+
 /* ---------- glossary ---------- */
 const GLOSS=[
  ['NAV','The price of one unit of a fund, declared daily. Your value = units × NAV. A "high" NAV is not expensive — only growth matters.'],
@@ -908,6 +1039,7 @@ const HI={
  h_data:'डेटा और बैकअप',
  dt_help:'डेटा सिर्फ़ इसी ब्राउज़र में है और फ़ोन storage साफ़ होने पर खो सकता है। समय-समय पर बैकअप निकालें; दूसरे फ़ोन पर restore भी कर सकते हैं।',
  dt_exp:'बैकअप निकालें', dt_imp:'बैकअप लाएँ',
+ dt_csv:'होल्डिंग्स CSV में निकालें (Excel में खुलेगा)',
  h_gloss:'इन शब्दों का मतलब?',
  d_footer:'NAV आधिकारिक AMFI मूल्य हैं, आपके ब्राउज़र में लाइव आते हैं। सारा डेटा इसी फ़ोन पर रहता है। On-track/Watch/Review टैग एक पारदर्शी नियम-इंजन से आते हैं — ये <b>शैक्षिक टिप्पणियाँ हैं, निवेश सलाह नहीं, और SEBI-पंजीकृत सलाहकार से नहीं</b>। म्यूचुअल फंड निवेश बाज़ार जोखिम के अधीन हैं; योजना से जुड़े सभी दस्तावेज़ ध्यान से पढ़ें। कोई भी खरीद/बिक्री SEBI-पंजीकृत सलाहकार से पुष्टि करके ही करें।',
  b_nav:'NAV', b_upd:'अपडेट', b_prof:'प्रोफ़ाइल'};
@@ -922,7 +1054,7 @@ function applyLang(){
     const v=lang==='hi'?(HI[k]||_enDefaults[k]):_enDefaults[k];
     if(v!=null)el.innerHTML=v;});
   const b=$('langBtn');if(b)b.textContent=lang==='hi'?'EN':'हिं';}
-function toggleLang(){LS.s('lang',LS.g('lang','en')==='hi'?'en':'hi');applyLang();}
+function toggleLang(){LS.s('lang',LS.g('lang','en')==='hi'?'en':'hi');applyLang();if(window._hrows)drawHold();}
 
 /* ---------- profile ---------- */
 function ensureProfile(strict){
@@ -961,8 +1093,20 @@ document.addEventListener('click',e=>{
 $('shots').addEventListener('change',()=>{const n=$('shots').files.length;$('shotcount').textContent=n?n+' image(s) selected':'';});
 $('casFile').addEventListener('change',()=>{const f=$('casFile').files[0];if(f)importCAS(f);$('casFile').value='';});
 $('impFile').addEventListener('change',()=>{const f=$('impFile').files[0];if(f)importData(f);$('impFile').value='';});
+const _rsf=$('rescanFile');if(_rsf)_rsf.addEventListener('change',()=>{const f=_rsf.files[0];if(f)doRescan(f);_rsf.value='';});
 
-if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+/* Update flow: when a new build is downloaded, offer a one-tap reload instead of
+   silently serving the old cached code (the "my fix didn't arrive" trap). */
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').then(reg=>{
+  reg.addEventListener('updatefound',()=>{const w=reg.installing;if(!w)return;
+    w.addEventListener('statechange',()=>{
+      if(w.state==='installed'&&navigator.serviceWorker.controller){
+        const b=document.createElement('div');
+        b.style.cssText='position:fixed;bottom:78px;left:14px;right:14px;max-width:452px;margin:0 auto;background:#13213f;color:#fff;padding:13px 15px;border-radius:12px;z-index:60;font-size:13px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,.25);cursor:pointer';
+        b.innerHTML='⬆️ A new version is ready — <b>tap to update</b>';
+        b.onclick=()=>location.reload();
+        document.body.appendChild(b);}});});
+}).catch(()=>{});
 (function init(){const v=$('ver');if(v)v.textContent='v'+APP_VERSION;
   applyLang();renderGloss();renderQuiz();
   if(!LS.g('consent',null)){show('welcome');return;}

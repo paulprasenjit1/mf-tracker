@@ -157,6 +157,7 @@ details.gl div{font-size:12.5px;color:var(--muted);line-height:1.55;padding:6px 
     <button class="btn-sec" style="width:100%;border-radius:10px;padding:11px;margin-top:2px" onclick="addEditRow()">＋ <span data-i18n="r_addrow">Add another fund</span></button>
     <button class="btn btn-primary" style="margin-top:10px" onclick="saveHoldings()" data-i18n="r_build">Build my dashboard</button>
     <p class="small" id="matchStatus" style="margin-top:8px" aria-live="polite"></p>
+    <input id="rescanFile" type="file" accept="image/*" class="hide">
   </div>
 </div>
 
@@ -235,6 +236,7 @@ details.gl div{font-size:12.5px;color:var(--muted);line-height:1.55;padding:6px 
       <label class="btn-sec" style="flex:1;text-align:center;border-radius:10px;padding:11px;cursor:pointer">⬆️ <span data-i18n="dt_imp">Import backup</span>
         <input id="impFile" type="file" accept="application/json,.json" class="hide"></label>
     </div>
+    <button class="btn-sec" style="width:100%;border-radius:10px;padding:11px;margin-top:8px" onclick="exportCSV()">📊 <span data-i18n="dt_csv">Export holdings as CSV (opens in Excel)</span></button>
     <div id="dataMsg" class="small" style="margin-top:8px" aria-live="polite"></div>
   </div>
   <h2>📖 <span data-i18n="h_gloss">What do these words mean?</span></h2>
