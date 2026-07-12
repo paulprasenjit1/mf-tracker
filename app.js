@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='3.2 · build 32';
+const APP_VERSION='3.3 · build 33';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}`,c=>`https://api.mfapi.in/mf/${c}/latest`]; // full history first: also yields yesterday's NAV for day-change
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -160,6 +160,7 @@ async function getNavHistory(code){
    and renamed schemes (e.g. "Nippon India Growth Mid Cap Fund" vs AMFI's
    "Nippon India Growth Fund") via token-set similarity, not substring luck. */
 function normFund(s){return String(s).toLowerCase()
+  .replace(/([a-z])(etf|fof)\b/g,'$1 $2') // OCR glue: "goldetf fof" -> "gold etf fof"
   .replace(/\bfof\b/g,'fund of fund')
   .replace(/&/g,' and ')
   .replace(/[-–—()]/g,' ')
@@ -314,7 +315,9 @@ function parsePortfolio(text){
     let name=lines[i]
       .replace(/\s*[-–—]\s*(regular|direct)?\s*(plan)?\s*(gr(owth)?)\b.*$/i,'')
       .replace(/\s*[-–—]\s*(idcw|dividend|payout|reinvest).*$/i,'')
-      .replace(/[↗➔→»➜↑]+/g,'').replace(/^[^A-Za-z]+/,'').replace(/\s{2,}/g,' ').trim();
+      .replace(/[↗➔→»➜↑]+/g,'').replace(/^[^A-Za-z]+/,'')
+      .replace(/([a-z])(ETF|FoF)\b/g,'$1 $2') // un-glue "GoldETF FoF"
+      .replace(/\s{2,}/g,' ').trim();
     if(name.length<6)continue;
     let end=Math.min(lines.length,i+9);
     for(let j=i+1;j<end;j++){if(isName(lines[j])){end=j;break;}}
