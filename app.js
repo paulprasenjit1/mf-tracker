@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='3.1 · build 31';
+const APP_VERSION='3.2 · build 32';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}`,c=>`https://api.mfapi.in/mf/${c}/latest`]; // full history first: also yields yesterday's NAV for day-change
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -363,9 +363,12 @@ function parsePortfolio(text){
       if(iv>0&&cur/iv>0.2&&cur/iv<5){inv=iv;fixed=false;}}
     // Buy year: only from a date-shaped token (e.g. 12-Mar-2023 / 12/03/2023), as in CAS transaction rows.
     const ym=blk0.match(/\b\d{1,2}[-\/]([A-Za-z]{3}|\d{1,2})[-\/](20\d{2})\b/);
-    // Low OCR confidence: Tesseract wasn't sure about a numeric line in this block.
-    const lowconf=_lowConf.some(t=>blk0.includes(t));
-    out.push({name,inv,cur,units:units[0]||0,nav:nav4[0]||0,flag:!fixed||lowconf,lowconf,img:imgOf[i]||0,year:ym?+ym[2]:''});}
+    /* Low OCR confidence: only relevant when the numbers DON'T cross-check.
+       A row whose Inv + Gain = Cur (or Inv × ret% = Cur) is arithmetically
+       confirmed — that beats the engine's own confidence score, which runs
+       low on many statement fonts and would otherwise flag everything. */
+    const lowconf=!fixed&&_lowConf.some(t=>blk0.includes(t));
+    out.push({name,inv,cur,units:units[0]||0,nav:nav4[0]||0,flag:!fixed,lowconf,img:imgOf[i]||0,year:ym?+ym[2]:''});}
   const map={};
   // Dedup overlapping screenshots: prefer the cleanly cross-checked copy of a fund
   // (screenshot edges often cut a card in half, mangling one copy's numbers).
