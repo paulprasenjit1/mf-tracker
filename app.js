@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='3.0 · build 30';
+const APP_VERSION='3.1 · build 31';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}`,c=>`https://api.mfapi.in/mf/${c}/latest`]; // full history first: also yields yesterday's NAV for day-change
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -330,7 +330,8 @@ function parsePortfolio(text){
     const uniq=a=>[...new Set(a.filter(v=>v>0))];
     const invC=uniq([pos[0],strip1(pos[0]),pos[1],strip1(pos[1]),pos[2]]);
     const curC=uniq([pos[1],strip1(pos[1]),pos[0],strip1(pos[0]),pos[2]]);
-    const gains=uniq(signed.map(x=>Math.abs(x)));
+    // Gains also suffer the ₹→3/7 merge (e.g. "3280.26" = ₹280.26) — try stripped variants too.
+    const gains=uniq(signed.map(x=>Math.abs(x)).flatMap(x=>[x,strip1(x)]));
     const cc=(units[0]&&nav4[0])?Math.round(units[0]*nav4[0]*100)/100:0;   // Units × NAV = reliable Current
     const tol=cv=>Math.max(2,cv*0.004);
     const gOK=(iv,cv)=>gains.some(g=>Math.abs(iv+g-cv)<2||Math.abs(iv-g-cv)<2);          // Inv ± Gain = Cur
@@ -366,7 +367,11 @@ function parsePortfolio(text){
     const lowconf=_lowConf.some(t=>blk0.includes(t));
     out.push({name,inv,cur,units:units[0]||0,nav:nav4[0]||0,flag:!fixed||lowconf,lowconf,img:imgOf[i]||0,year:ym?+ym[2]:''});}
   const map={};
-  out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);if(!map[k]||o.inv>map[k].inv)map[k]=o;});
+  // Dedup overlapping screenshots: prefer the cleanly cross-checked copy of a fund
+  // (screenshot edges often cut a card in half, mangling one copy's numbers).
+  out.forEach(o=>{const k=o.name.toLowerCase().replace(/[^a-z]/g,'').slice(0,30);
+    const ex=map[k];
+    if(!ex||(ex.flag&&!o.flag)||(ex.flag===o.flag&&o.inv>ex.inv))map[k]=o;});
   const rows=Object.values(map);
   reconcileTotals(rows,_stmtTot);
   return rows;}
