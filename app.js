@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='2.8 · build 28';
+const APP_VERSION='2.9 · build 29';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -236,13 +236,28 @@ async function onBuild(){
     const worker=await Tesseract.createWorker('eng');
     await worker.setParameters({tessedit_pageseg_mode:'6'});
     for(let i=0;i<files.length;i++){$('busysub').textContent=`Image ${i+1} of ${files.length}…`;
-      try{const r=await worker.recognize(files[i]);text+='\n'+r.data.text;}catch(e){}}
+      let src=files[i];try{src=await prepImage(files[i]);}catch(e){}
+      try{const r=await worker.recognize(src);text+='\n'+r.data.text;}catch(e){}}
     await worker.terminate();
   }catch(e){ // fallback: old path with default segmentation
     for(let i=0;i<files.length;i++){$('busysub').textContent=`Image ${i+1} of ${files.length}…`;
       try{const r=await Tesseract.recognize(files[i],'eng');text+='\n'+r.data.text;}catch(e2){}}}
   busy(false);
+  try{LS.s('lastOCR',text.slice(0,60000));}catch(e){} // debug: raw scan text
   startReview(parsePortfolio(text));}
+/* Upscale to ~2200px wide + grayscale before OCR — phone screenshots at native
+   width are often too small for Tesseract to read digits reliably. */
+function prepImage(file){return new Promise((res,rej)=>{const img=new Image();
+  img.onload=()=>{try{
+    const sc=Math.max(1,Math.min(3,2200/img.width));
+    const c=document.createElement('canvas');c.width=Math.round(img.width*sc);c.height=Math.round(img.height*sc);
+    const x=c.getContext('2d');x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';
+    x.drawImage(img,0,0,c.width,c.height);
+    const d=x.getImageData(0,0,c.width,c.height),p=d.data;
+    for(let i=0;i<p.length;i+=4){const g=0.299*p[i]+0.587*p[i+1]+0.114*p[i+2];p[i]=p[i+1]=p[i+2]=g;}
+    x.putImageData(d,0,0);URL.revokeObjectURL(img.src);res(c);
+  }catch(e){rej(e);}};
+  img.onerror=()=>rej(new Error('img'));img.src=URL.createObjectURL(file);});}
 function strip1(x){ // drop a spurious leading digit (OCR reads ₹ as 3/7): 326048.62 -> 26048.62
   if(!x||x<=0)return 0;const s=x.toFixed(2),d=s.indexOf('.'),ip=s.slice(0,d);
   if(ip.length<=1)return 0;return parseFloat(ip.slice(1)+s.slice(d));}
@@ -268,6 +283,7 @@ function reconcileTotals(rows,tot){
     if(!target)return;
     const tolr=Math.max(10,target*0.002);
     let sum=rows.reduce((a,r)=>a+(r[fld]||0),0),guard=0;
+    if(target&&sum>0&&Math.abs(sum-target)/target>0.15)return; // summary itself is likely mis-OCR'd — don't bend rows toward it
     while(Math.abs(sum-target)>tolr&&guard++<=rows.length){
       let bestR=null,bestV=0,bestGain=1;
       rows.forEach(r=>{if(!r.flag)return;const s=strip1(r[fld]);if(s>0){const ns=sum-r[fld]+s;
@@ -374,7 +390,8 @@ function startReview(parsed){
   editRows=(parsed&&parsed.length)?parsed.map(r=>({name:r.name,inv:r.inv||0,cur:r.cur||0,units:r.units||0,nav:r.nav||0,year:'',flag:!!r.flag})):[{name:'',inv:0,cur:0,units:0,nav:0,year:'',flag:true}];
   renderEdit();
   const nf=editRows.filter(r=>r.flag).length;
-  $('dedupNote').innerHTML=(parsed&&parsed.length)?'<i>✓ deduped</i>':'';
+  $('dedupNote').innerHTML=((parsed&&parsed.length)?'<i>✓ deduped</i> ':'')+
+    (LS.g('lastOCR','')?'<a href="#" style="font-size:11px" onclick="navigator.clipboard.writeText(LS.g(\'lastOCR\',\'\')).then(()=>alert(\'Raw scan text copied — paste it to the developer to improve reading.\'));return false">copy scan text</a>':'');
   $('reviewTitle').textContent=(parsed&&parsed.length)?`Found ${parsed.length} funds — please verify`:'Enter your funds';
   $('matchStatus').innerHTML=nf&&parsed&&parsed.length?`<span style="color:var(--amber)">⚠ ${nf} row(s) could not be cross-checked (Invested + Gain ≠ Current) — compare the highlighted ones against your statement.</span>`:'';
   show('review');}
