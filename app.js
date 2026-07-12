@@ -227,9 +227,20 @@ async function onBuild(){
   busy(true,'Loading reader…','First scan loads the OCR engine (one-time).');
   try{await ensureTesseract();}catch(e){busy(false);alert(e.message);return;}
   busy(true,'Reading screenshots…','Runs on your phone — can take a moment.');
+  /* PSM 6 (single uniform block) keeps each visual row together left-to-right.
+     Default page segmentation splits the holdings cards into COLUMN blocks,
+     dumping every Gain/Loss and return % detached at the end of the text — the
+     parser then never sees them next to the fund name and rows fail to parse. */
   let text='';
-  for(let i=0;i<files.length;i++){$('busysub').textContent=`Image ${i+1} of ${files.length}…`;
-    try{const r=await Tesseract.recognize(files[i],'eng');text+='\n'+r.data.text;}catch(e){}}
+  try{
+    const worker=await Tesseract.createWorker('eng');
+    await worker.setParameters({tessedit_pageseg_mode:'6'});
+    for(let i=0;i<files.length;i++){$('busysub').textContent=`Image ${i+1} of ${files.length}…`;
+      try{const r=await worker.recognize(files[i]);text+='\n'+r.data.text;}catch(e){}}
+    await worker.terminate();
+  }catch(e){ // fallback: old path with default segmentation
+    for(let i=0;i<files.length;i++){$('busysub').textContent=`Image ${i+1} of ${files.length}…`;
+      try{const r=await Tesseract.recognize(files[i],'eng');text+='\n'+r.data.text;}catch(e2){}}}
   busy(false);
   startReview(parsePortfolio(text));}
 function strip1(x){ // drop a spurious leading digit (OCR reads ₹ as 3/7): 326048.62 -> 26048.62
