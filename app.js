@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='3.3 · build 33';
+const APP_VERSION='3.4 · build 34';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}`,c=>`https://api.mfapi.in/mf/${c}/latest`]; // full history first: also yields yesterday's NAV for day-change
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -619,19 +619,24 @@ function renderDash(holds,navs,dates,live){
   const allLabels=labels.concat(projLabels);
   const valData=hist.map(x=>x.cur).concat(new Array(yrs).fill(null));
   const ptR=hist.map((_,i)=>i===hist.length-1?5:2).concat(new Array(yrs).fill(0));
-  const projData=new Array(hist.length-1).fill(null).concat([tc]).concat(Array.from({length:yrs},(_,i)=>Math.round(tc*Math.pow(1+r,i+1))));
+  const tail=f=>new Array(hist.length-1).fill(null).concat([tc]).concat(Array.from({length:yrs},(_,i)=>Math.round(tc*Math.pow(1+f,i+1))));
+  const projHi=tail(rHi),projLo=tail(rLo),projMid=tail(r);
   if(trendChart)trendChart.destroy();
   trendChart=new Chart($('trendChart'),{type:'line',data:{labels:allLabels,datasets:[
-    {label:'Projected',data:projData,borderColor:'#0f9d58',backgroundColor:'rgba(15,157,88,.08)',borderDash:[5,4],pointRadius:(c)=>c.dataIndex===projData.length-1?4:0,pointBackgroundColor:'#0f9d58',fill:true,tension:.3,order:2},
-    {label:'Your value',data:valData,borderColor:'#1457d6',backgroundColor:'rgba(20,87,214,.10)',fill:true,tension:.25,pointRadius:ptR,pointBackgroundColor:'#1457d6',borderWidth:2,order:1},
-    {label:'Invested',data:hist.map(()=>ti).concat(new Array(yrs).fill(ti)),borderColor:'#c4cbd6',borderDash:[3,4],pointRadius:0,borderWidth:1,order:3}]},
-    options:{plugins:{legend:{position:'bottom',labels:{boxWidth:14,font:{size:11},usePointStyle:true}},
-      tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.parsed.y!=null?inr(c.parsed.y):'—')}}},
-      responsive:true,maintainAspectRatio:false,animation:false,
-      scales:{x:{grid:{display:false},ticks:{font:{size:10},maxRotation:0,autoSkip:true,maxTicksLimit:6}},
-        y:{grid:{color:'#eef1f6'},ticks:{font:{size:10},callback:v=>'₹'+(v/100000).toFixed(1)+'L'}}}}});
+    {label:'Possible range',data:projHi,borderColor:'rgba(15,157,88,.35)',backgroundColor:'rgba(15,157,88,.12)',borderWidth:1,pointRadius:0,fill:'+1',tension:.3,order:4},
+    {label:'range-low',data:projLo,borderColor:'rgba(15,157,88,.35)',borderWidth:1,pointRadius:0,fill:false,tension:.3,order:4},
+    {label:'Expected path',data:projMid,borderColor:'#0f9d58',borderDash:[6,4],borderWidth:2,pointRadius:c=>c.dataIndex===projMid.length-1?4:0,pointBackgroundColor:'#0f9d58',fill:false,tension:.3,order:2},
+    {label:'Your value',data:valData,borderColor:'#1457d6',backgroundColor:'rgba(20,87,214,.10)',fill:true,tension:.25,pointRadius:ptR,pointBackgroundColor:'#1457d6',borderWidth:2.5,order:1},
+    {label:'What you invested',data:hist.map(()=>ti).concat(new Array(yrs).fill(ti)),borderColor:'#9aa3b5',borderDash:[3,4],pointRadius:0,borderWidth:1.5,order:3}]},
+    options:{plugins:{legend:{position:'bottom',labels:{boxWidth:14,font:{size:11},usePointStyle:true,
+        filter:i=>i.text!=='range-low'}},
+      tooltip:{filter:c=>c.dataset.label!=='range-low',
+        callbacks:{label:c=>c.dataset.label+': '+(c.parsed.y!=null?inr(c.parsed.y):'—')}}},
+      responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'index',intersect:false},
+      scales:{x:{grid:{display:false},ticks:{font:{size:10},maxRotation:0,autoSkip:true,maxTicksLimit:5}},
+        y:{grid:{color:'#eef1f6'},ticks:{font:{size:10},callback:v=>v>=100000?'₹'+(v/100000).toFixed(1)+'L':'₹'+Math.round(v/1000)+'k'}}}}});
   const fvLo=tc*Math.pow(1+rLo,yrs),fvMid=tc*Math.pow(1+r,yrs),fvHi=tc*Math.pow(1+rHi,yrs);
-  $('projection').innerHTML=`<b>Today ${inr(tc)}</b> → in ${yrs} yrs somewhere around <b>${inr(fvLo)}–${inr(fvHi)}</b> (midpoint ~${inr(fvMid)} at ~${(r*100).toFixed(1)}%/yr, no fresh money). Grey = what you invested (${inr(ti)}); blue = where you are; green = midpoint path. <span style="color:var(--muted)">Markets don't move in straight lines — this is an illustration, not a promise or a target.</span>`;
+  $('projection').innerHTML=`Reading the chart: <span style="color:#1457d6"><b>blue</b></span> is your money today (${inr(tc)}), the grey dashes are what you put in (${inr(ti)}), and the <span style="color:#0f9d58"><b>green band</b></span> is where it could plausibly be in ${yrs} years if left alone: <b>${inr(fvLo)} – ${inr(fvHi)}</b>. <span style="color:var(--muted)">Markets don't move in straight lines — an illustration, not a promise.</span>`;
   if($('growAmt').value)planGrow();
   if($('calAmt').value)planCal();
   show('dash');}
@@ -883,45 +888,68 @@ function growCandidates(newAmt){
     c.push({name:f?f.name:'Gold ETF FoF',type:'Gold',bucket:'gold',w:gap.gold*(1+0.3*bias('gold')),action:f?'Top-up':'NEW',why:'Hedge to ~target weight.'});}
   return {cands:c.filter(x=>x.w>0).sort((a,b)=>b.w-a.w),t,total,sig};}
 
-function planGrow(){
-  const newAmt=parseFloat($('growAmt').value)||0;
-  if(newAmt<=0){$('growOut').innerHTML='<div class="note">Enter an amount to see an illustration.</div>';return;}
+/* Shared allocator: split an amount across the highest-priority gaps, ₹500-rounded. */
+function allocatePlan(newAmt){
   const {cands,t,sig}=growCandidates(newAmt);
-  if(!cands.length){$('growOut').innerHTML='<div class="note">Your allocation is already near the reference mix — topping up your steadiest core (hybrid or a large-cap/index fund), or simply holding, are both reasonable.</div>';return;}
+  if(!cands.length)return{chosen:[],t,sig};
   const N=Math.max(1,Math.min(cands.length,Math.round(newAmt/25000)||1));
   const chosen=cands.slice(0,N);
   const ws=chosen.reduce((a,b)=>a+b.w,0)||1;
-  const rd=n=>Math.max(500,Math.round(n/500)*500);
-  chosen.forEach(c=>{c.amt=rd(newAmt*c.w/ws);});
+  chosen.forEach(c=>{c.amt=Math.max(500,Math.round(newAmt*c.w/ws/500)*500);});
   const s=chosen.reduce((a,b)=>a+b.amt,0);chosen[0].amt+=Math.round(newAmt-s);
   chosen.forEach(c=>c.pct=Math.round(c.amt/newAmt*100));
+  return{chosen,t,sig};}
+function planGrow(){
+  const newAmt=parseFloat($('growAmt').value)||0;
+  if(newAmt<=0){$('growOut').innerHTML='<div class="note">Enter an amount to see an illustration.</div>';return;}
+  const {chosen,t,sig}=allocatePlan(newAmt);
+  if(!chosen.length){$('growOut').innerHTML='<div class="note">Your allocation is already near the reference mix — topping up your steadiest core (hybrid or a large-cap/index fund), or simply holding, are both reasonable.</div>';return;}
+  /* Advisor-style briefing: where you stand → what this money fixes → how to execute. */
+  const b=bucketTotals(),tot=b.total||1;
+  const pos=`Equity ${(b.equity/tot*100).toFixed(0)}% (target ${t.equity}%) · Hybrid ${(b.hybrid/tot*100).toFixed(0)}% (${t.hybrid}%) · Gold ${(b.gold/tot*100).toFixed(0)}% (${t.gold}%) · Debt ${(b.debt/tot*100).toFixed(0)}% (${t.debt}%)`;
+  const after={};['equity','hybrid','gold','debt'].forEach(k=>after[k]=b[k]);
+  chosen.forEach(c=>after[c.bucket]+=c.amt);
+  const aTot=tot+newAmt;
+  const posAfter=`Equity ${(after.equity/aTot*100).toFixed(0)}% · Hybrid ${(after.hybrid/aTot*100).toFixed(0)}% · Gold ${(after.gold/aTot*100).toFixed(0)}% · Debt ${(after.debt/aTot*100).toFixed(0)}%`;
+  const big=newAmt>tot*0.12;
+  const exec=big
+    ?`This is a meaningful sum relative to your portfolio (~${(newAmt/tot*100).toFixed(0)}% of it) — most advisers would stagger it over 2–3 months rather than invest in one day. Use the <b>Buy calendar</b> below with these same numbers.`
+    :`At this size, investing in one go on your usual date is fine — staggering adds little.`;
   const tagc=a=>a==='NEW'?'t-review':'t-watch';
-  $('growOut').innerHTML=`<div class="note" style="margin-bottom:8px">One way to spread <b>${inr(newAmt)}</b> across <b>${chosen.length} ${chosen.length>1?'funds':'fund'}</b>, weighted to your biggest gaps vs a ${t.equity}/${t.hybrid}/${t.gold}/${t.debt} reference mix${sig?', tilted by your news signals':''}. <b>An illustration to discuss — not a recommendation.</b></div>
-   <table><thead><tr><th>Put into</th><th style="text-align:right">Amount</th><th style="text-align:right">%</th><th>Why</th></tr></thead><tbody>${
-   chosen.map(c=>`<tr><td><div class="fname">${esc(c.name)} <span class="tag ${tagc(c.action)}" style="font-size:9px;padding:1px 6px">${c.action}</span></div><div class="fsub">${esc(c.type)}</div></td>
-     <td style="text-align:right">${inr(c.amt)}</td><td style="text-align:right">${c.pct}%</td><td class="why" style="max-width:120px">${esc(c.why)}</td></tr>`).join('')}</tbody></table>`;}
+  $('growOut').innerHTML=
+   `<div class="note" style="margin-bottom:6px"><b>Where you stand:</b> ${pos}.</div>
+    <div class="note" style="margin-bottom:8px"><b>What this ${inr(newAmt)} does:</b> fills your biggest gaps first${sig?' (tilted by your news signals)':''}, moving you to roughly ${posAfter}.</div>
+    <table><thead><tr><th>Put into</th><th style="text-align:right">Amount</th><th style="text-align:right">%</th><th>Why</th></tr></thead><tbody>${
+    chosen.map(c=>`<tr><td><div class="fname">${esc(c.name)} <span class="tag ${tagc(c.action)}" style="font-size:9px;padding:1px 6px">${c.action}</span></div><div class="fsub">${esc(c.type)}</div></td>
+      <td style="text-align:right">${inr(c.amt)}</td><td style="text-align:right">${c.pct}%</td><td class="why" style="max-width:120px">${esc(c.why)}</td></tr>`).join('')}</tbody></table>
+    <div class="note" style="margin-top:8px"><b>How to execute:</b> ${exec}</div>
+    <div class="note" style="margin-top:6px;color:var(--muted)">"NEW" funds need a one-time KYC-linked purchase; top-ups go into schemes you already hold. An illustration to discuss with a registered adviser — not a recommendation.</div>`;}
 
 /* ---------- Buy calendar (largest-remainder rounding so months add up) ---------- */
 function planCal(){
   const newAmt=parseFloat($('calAmt').value)||0;const months=Math.max(1,Math.min(12,parseInt($('calMonths').value)||3));
   if(newAmt<=0){$('calOut').innerHTML='<div class="note">Enter the amount and months to generate a schedule.</div>';return;}
-  const {cands,sig}=growCandidates(newAmt);
-  const catW={};cands.forEach(c=>{const lbl={equity:'Equity (index + core)',hybrid:'Hybrid',gold:'Gold',debt:'Debt'}[c.bucket];catW[lbl]=(catW[lbl]||0)+c.w;});
-  let cats=Object.entries(catW).map(([c,w])=>({c,w}));
-  if(!cats.length)cats=[{c:'Hybrid / large-cap core',w:1}];
-  const ws=cats.reduce((a,x)=>a+x.w,0)||1;cats.forEach(x=>x.pct=Math.round(x.w/ws*100));
-  const per=Math.round(newAmt/months);
-  // largest-remainder: round each category to ₹100, then push the difference into the biggest slice
-  cats.forEach(x=>x.amt=Math.round(per*x.pct/100/100)*100);
-  const diff=per-cats.reduce((a,x)=>a+x.amt,0);
-  cats.sort((a,b)=>b.w-a.w)[0].amt+=diff;
+  /* Fund-level schedule (what an adviser would hand you), not just categories. */
+  const {chosen,sig}=allocatePlan(newAmt);
+  if(!chosen.length){$('calOut').innerHTML='<div class="note">Your mix is already near target — if you still want to invest, a hybrid or index core on a fixed monthly date is the simple default.</div>';return;}
+  // Per fund: split its total across months, ₹100-rounded, remainder in the final month.
+  chosen.forEach(c=>{c.per=Math.round(c.amt/months/100)*100;c.last=c.amt-c.per*(months-1);});
   const mBias=(sig&&(sig.items.market||sig.items.nifty)||{}).bias||0;
-  const tone=mBias>0?'📈 Signals lean positive — continuing on your dates looks reasonable.':mBias<0?'📉 Signals lean cautious — stick to the staggered plan, don\'t front-load.':'Steady staggering is the safe default (no strong market signal).';
-  let rows='';for(let mo=1;mo<=months;mo++){
-    const buys=cats.map(x=>`${esc(x.c)} — ${inr(x.amt)} (${x.pct}%)`).join('<br>');
-    rows+=`<tr><td style="vertical-align:top;white-space:nowrap"><b>Month ${mo}</b></td><td style="text-align:left;color:var(--green);font-size:12px">${buys}</td></tr>`;}
-  $('calOut').innerHTML=`<div class="note" style="margin-bottom:8px">${inr(newAmt)} over ${months} month(s) = ${inr(per)}/month. ${tone} Invest on a fixed date each month. <b>An illustration, not a recommendation.</b></div>
-   <table><thead><tr><th>When</th><th style="text-align:left">Invest into (category · ₹ · %)</th></tr></thead><tbody>${rows}</tbody></table>`;}
+  const tone=mBias>0?'Signals lean positive — keeping to your dates looks reasonable.':mBias<0?'Signals lean cautious — stick to the staggered dates, don\'t front-load.':'No strong market signal — steady staggering is the safe default.';
+  const mNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const now=new Date();
+  let rows='';
+  for(let mo=0;mo<months;mo++){
+    const d=new Date(now.getFullYear(),now.getMonth()+mo+ (now.getDate()>5?1:0),5);
+    const buys=chosen.map(c=>{const amt=mo===months-1?c.last:c.per;
+      return amt>0?`${esc(c.name)} — <b>${inr(amt)}</b>`:'';}).filter(Boolean).join('<br>');
+    const tot=chosen.reduce((a,c)=>a+(mo===months-1?c.last:c.per),0);
+    rows+=`<tr><td style="vertical-align:top;white-space:nowrap"><b>${d.getDate()} ${mNames[d.getMonth()]}</b><div class="fsub">${inr(tot)}</div></td>
+      <td style="text-align:left;font-size:12px;line-height:1.7">${buys}</td></tr>`;}
+  $('calOut').innerHTML=
+   `<div class="note" style="margin-bottom:8px"><b>${inr(newAmt)} over ${months} month(s):</b> buy on the same date each month (the 5th is used below) so it becomes a habit, not a timing decision. ${tone}</div>
+    <table><thead><tr><th>Date</th><th style="text-align:left">Invest into</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="note" style="margin-top:8px;color:var(--muted)">Tip: set these up as SIPs/systematic transfers on the 5th and they run automatically. An illustration, not a recommendation — confirm with a registered adviser.</div>`;}
 
 function resetGrow(){$('growAmt').value='';$('growOut').innerHTML='';}
 function resetCal(){$('calAmt').value='';$('calMonths').value='3';$('calOut').innerHTML='';}

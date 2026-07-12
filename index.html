@@ -139,6 +139,17 @@ details.gl div{font-size:12.5px;color:var(--muted);line-height:1.55;padding:6px 
   </div>
 
   <div class="card">
+    <p style="font-size:15px;font-weight:600;margin:0 0 8px">💾 <span data-i18n="h_data">Data &amp; backup</span></p>
+    <div style="display:flex;gap:8px">
+      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="exportData()">⬇️ <span data-i18n="dt_exp">Export backup</span></button>
+      <label class="btn-sec" style="flex:1;text-align:center;border-radius:10px;padding:11px;cursor:pointer">⬆️ <span data-i18n="dt_imp">Import backup</span>
+        <input id="impFile" type="file" accept="application/json,.json" class="hide"></label>
+    </div>
+    <button class="btn-sec" style="width:100%;border-radius:10px;padding:11px;margin-top:8px" onclick="exportCSV()">📊 <span data-i18n="dt_csv">Export holdings as CSV (opens in Excel)</span></button>
+    <div id="dataMsg" class="small" style="margin-top:8px" aria-live="polite"></div>
+  </div>
+
+  <div class="card">
     <button class="btn btn-sec" style="color:var(--red);border-color:var(--redbg)" onclick="resetApp()">🗑 <span data-i18n="s_reset">Reset app &amp; clear all data</span></button>
     <div class="small" style="margin-top:6px" data-i18n="s_reset2">Erases your profile, holdings, history and signals from this phone and starts fresh.</div>
   </div>
@@ -177,7 +188,7 @@ details.gl div{font-size:12.5px;color:var(--muted);line-height:1.55;padding:6px 
     <div class="allocbar" id="allocbar"></div><div class="legend" id="alloclegend"></div>
     <div class="note" id="allocAdvice" style="margin-top:8px"></div></div>
   <h2 data-i18n="h_proj">Value &amp; projection over time</h2>
-  <div class="card" style="padding:10px 12px"><div class="chart-box" style="height:130px"><canvas id="trendChart" aria-label="Portfolio value trend chart"></canvas></div>
+  <div class="card" style="padding:10px 12px"><div class="chart-box" style="height:195px"><canvas id="trendChart" aria-label="Portfolio value trend chart"></canvas></div>
     <div class="note" id="projection" style="margin-top:6px"></div></div>
   <h2 data-i18n="h_funds">Fund-by-fund</h2>
   <div class="filterbar" id="holdFilters">
@@ -228,20 +239,6 @@ details.gl div{font-size:12.5px;color:var(--muted);line-height:1.55;padding:6px 
     <div id="aiMsg" class="small" style="margin-top:8px" aria-live="polite"></div>
     <div class="note" style="margin-top:10px">Open: <a href="https://claude.ai/new" target="_blank" rel="noopener">Claude</a> · <a href="https://chatgpt.com" target="_blank" rel="noopener">ChatGPT</a> · <a href="https://gemini.google.com/app" target="_blank" rel="noopener">Gemini</a></div>
   </div>
-  <h2>💾 <span data-i18n="h_data">Data &amp; backup</span></h2>
-  <div class="card">
-    <div class="note" style="margin-bottom:10px" data-i18n="dt_help">Your data lives only in this browser and can be lost if the phone clears storage. Export a backup file now and again; import it to restore on this or another phone.</div>
-    <div style="display:flex;gap:8px">
-      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="exportData()">⬇️ <span data-i18n="dt_exp">Export backup</span></button>
-      <label class="btn-sec" style="flex:1;text-align:center;border-radius:10px;padding:11px;cursor:pointer">⬆️ <span data-i18n="dt_imp">Import backup</span>
-        <input id="impFile" type="file" accept="application/json,.json" class="hide"></label>
-    </div>
-    <button class="btn-sec" style="width:100%;border-radius:10px;padding:11px;margin-top:8px" onclick="exportCSV()">📊 <span data-i18n="dt_csv">Export holdings as CSV (opens in Excel)</span></button>
-    <div id="dataMsg" class="small" style="margin-top:8px" aria-live="polite"></div>
-  </div>
-  <h2>📖 <span data-i18n="h_gloss">What do these words mean?</span></h2>
-  <div class="card" id="gloss"></div>
-
   <div class="disclaimer" data-i18n-html="d_footer">NAVs are official AMFI values (via mfapi.in with AMFI fallback), fetched live in your browser; if stale, the fund is flagged and the last good value is shown. All data stays on this phone. The On-track/Watch/Review notes come from a transparent rules engine using your age, horizon and risk answers — they are <b>educational observations, not investment advice, and not from a SEBI-registered adviser</b>. Mutual fund investments are subject to market risks; read all scheme-related documents carefully. Confirm any buy or sell decision with a SEBI-registered investment adviser or your distributor.</div>
 </div>
 </div>
