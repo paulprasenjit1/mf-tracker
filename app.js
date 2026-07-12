@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='2.7 · build 27';
+const APP_VERSION='2.8 · build 28';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}/latest`,c=>`https://api.mfapi.in/mf/${c}`];
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
