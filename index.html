@@ -182,6 +182,7 @@ details.gl div{font-size:12.5px;color:var(--muted);line-height:1.55;padding:6px 
       <button class="btn-ghost" style="width:auto;padding:7px 14px;font-size:12px;border-radius:20px" onclick="refresh(true)">↻ <span data-i18n="d_refresh">Refresh</span></button></div>
   </div>
   <div id="staleCtx"></div>
+  <div id="diary"></div>
   <div class="kpis" id="kpis"></div>
   <h2 data-i18n="h_alloc">Where your money sits</h2>
   <div class="card" style="padding:12px 14px">
@@ -190,6 +191,20 @@ details.gl div{font-size:12.5px;color:var(--muted);line-height:1.55;padding:6px 
   <h2 data-i18n="h_proj">Value &amp; projection over time</h2>
   <div class="card" style="padding:10px 12px"><div class="chart-box" style="height:195px"><canvas id="trendChart" aria-label="Portfolio value trend chart"></canvas></div>
     <div class="note" id="projection" style="margin-top:6px"></div></div>
+  <h2>🎯 <span data-i18n="h_goals">Your goals</span></h2>
+  <div class="card">
+    <div id="goalList"></div>
+    <div class="editrow" style="grid-template-columns:1fr 1fr;margin-top:10px">
+      <input id="goalName" placeholder="Goal (e.g. Retirement)" aria-label="Goal name">
+      <input id="goalAmt" type="number" inputmode="numeric" placeholder="Target ₹ (e.g. 5000000)" aria-label="Target amount">
+    </div>
+    <div class="editrow" style="grid-template-columns:1fr 1fr 90px">
+      <input id="goalYear" type="number" inputmode="numeric" placeholder="Target year" aria-label="Target year">
+      <input id="goalShare" type="number" inputmode="numeric" placeholder="% of portfolio (100)" aria-label="Share of portfolio">
+      <button class="btn-primary" style="border:none;border-radius:10px;padding:11px;color:#fff;font-weight:600" onclick="addGoal()">Add</button>
+    </div>
+    <div class="note" style="margin-top:4px;color:var(--muted)">Projections use your profile's blended return — illustrations, not promises.</div>
+  </div>
   <h2 data-i18n="h_funds">Fund-by-fund</h2>
   <div class="filterbar" id="holdFilters">
     <button data-f="all" class="on">All</button><button data-f="ok">On track</button>
@@ -214,6 +229,14 @@ details.gl div{font-size:12.5px;color:var(--muted);line-height:1.55;padding:6px 
   </div>
   <h2>🧠 <span data-i18n="h_notes">Things worth understanding</span></h2>
   <div class="card" id="insights"></div>
+  <h2>🌊 <span data-i18n="h_stress">Stress test — could you sit through a crash?</span></h2>
+  <div class="card">
+    <div class="note" style="margin-bottom:8px">A veteran adviser's question: not "what will you earn?" but "what will you do when it falls?" See what history's worst did to a mix like yours.</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="stress('y2008')">2008 crisis</button>
+      <button class="btn-sec" style="flex:1;border-radius:10px;padding:11px" onclick="stress('y2020')">2020 Covid crash</button></div>
+    <div id="stressOut" aria-live="polite"></div>
+  </div>
   <h2>📡 <span data-i18n="h_sig">News-aware signals</span></h2>
   <div class="card">
     <div class="note" id="sigStatus" style="margin-bottom:10px"></div>

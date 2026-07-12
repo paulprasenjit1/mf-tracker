@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='3.4 · build 34';
+const APP_VERSION='4.0 · build 35';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}`,c=>`https://api.mfapi.in/mf/${c}/latest`]; // full history first: also yields yesterday's NAV for day-change
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -148,6 +148,7 @@ async function getNav(code){
   for(const mk of NAV_SRCS){try{const r=await fetch(mk(code),{cache:'no-store'});const j=await r.json();
     const d=j.data&&j.data[0];if(d&&parseFloat(d.nav)>0){
       const p=j.data[1]; // previous trading day, when the full-history endpoint answered
+      if(j.data.length>50)_histTmp[code]=j.data; // keep for performance stats (processed in refresh, then dropped)
       return{nav:parseFloat(d.nav),date:d.date,prev:p&&parseFloat(p.nav)>0?parseFloat(p.nav):0};}}catch(e){}}
   try{const map=await fetchAmfiMap();if(map[code])return map[code];}catch(e){}
   return null;}
@@ -547,6 +548,10 @@ async function refresh(force){
   if(!force&&fresh){renderDash(holds,navs,dates,-1);return;}
   $('status').textContent='Refreshing live NAVs…';let live=0;const prevs=LS.g('navPrev',{});
   await Promise.all(holds.filter(h=>h.code).map(async h=>{const x=await getNav(h.code);if(x){navs[h.code]=x.nav;dates[h.code]=x.date;if(x.prev)prevs[h.code]=x.prev;live++;}}));
+  // Phase 3: turn the fetched histories into performance stats, then free the memory.
+  const perf=LS.g('perf',{});
+  Object.keys(_histTmp).forEach(code=>{const p=computePerf(_histTmp[code]);if(p)perf[code]=p;delete _histTmp[code];});
+  LS.s('perf',perf);
   LS.s('navs',navs);LS.s('navDates',dates);LS.s('navPrev',prevs);LS.s('navTs',Date.now());
   renderDash(holds,navs,dates,live);}
 
@@ -604,6 +609,8 @@ function renderDash(holds,navs,dates,live){
   const yrs=HZYRS[p.horizon]||6,r=blendedReturn(t),rLo=Math.max(0.02,r-0.025),rHi=r+0.025;
   window._hrows=rows.slice().sort((a,b)=>b.cur-a.cur);
   drawHold();
+  renderDiary(rows);      // Phase 4: this-month adviser actions
+  renderGoals(tc,p);      // Phase 1: goal tracking + glide path
   const ins=computeInsights(rows,p,tc,t);
   $('insights').innerHTML='<div id="benchNote" class="note" style="margin-bottom:8px"></div><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px">'+ins.map(x=>`<li style="margin-bottom:6px">${x}</li>`).join('')+'</ul>';
   loadBenchmark(rows); // async, fills #benchNote when done
@@ -640,6 +647,105 @@ function renderDash(holds,navs,dates,live){
   if($('growAmt').value)planGrow();
   if($('calAmt').value)planCal();
   show('dash');}
+
+/* ================= ADVISER ENGINE (phases 1–5) =================
+   Everything here is educational illustration, not SEBI-registered advice. */
+
+/* --- Phase 3: per-fund performance from NAV history (computed during refresh) --- */
+let _histTmp={};
+function _navDate(s){const m=String(s).match(/(\d{2})-(\d{2})-(\d{4})/);return m?new Date(+m[3],+m[2]-1,+m[1]).getTime():0;}
+function computePerf(data){ // data newest-first from mfapi
+  try{
+    const nav=parseFloat(data[0].nav),t0=_navDate(data[0].date);if(!(nav>0&&t0))return null;
+    const at=days=>{const tgt=t0-days*864e5;for(const d of data){if(_navDate(d.date)<=tgt)return parseFloat(d.nav);}return null;};
+    const n1=at(365),n3=at(1095);
+    let peak=0;for(const d of data){if(_navDate(d.date)<t0-1095*864e5)break;const v=parseFloat(d.nav);if(v>peak)peak=v;}
+    return{r1:n1?(nav/n1-1)*100:null,r3:n3?(Math.pow(nav/n3,1/3)-1)*100:null,dd:peak>0?(nav/peak-1)*100:null};
+  }catch(e){return null;}}
+
+/* --- Phase 2: market stance from the benchmark index fund's own history --- */
+function marketStance(){
+  const m=LS.g('mkt',null);
+  if(!m||Date.now()-m.t>7*864e5)return{months:3,note:'no fresh market read — a steady 3-month stagger is the neutral default',read:null};
+  if(m.dev<=-10)return{months:2,note:`the market is ~${Math.abs(m.dev).toFixed(0)}% below its 200-day trend — weakness is when staggered buying works hardest; deploy a little faster`,read:m};
+  if(m.dev<=-3)return{months:2,note:`the market is ${Math.abs(m.dev).toFixed(0)}% below its 200-day trend — a 2-month stagger balances price and discipline`,read:m};
+  if(m.dev<5)return{months:3,note:'the market is near its own trend — no timing edge either way; a 3-month stagger is sensible',read:m};
+  return{months:4,note:`the market is ${m.dev.toFixed(0)}% above its 200-day trend${m.pos>-2?' and near its 52-week high':''} — nothing wrong with buying, but spreading over ${4} months lowers regret risk`,read:m};}
+
+/* --- Phase 5: scenario stress test (historical crash templates) --- */
+const SCEN={y2008:{label:'2008 global crisis',eq:-55,hy:-33,gold:15,de:7,rec:'≈2 years to recover'},
+            y2020:{label:'2020 Covid crash',eq:-38,hy:-23,gold:5,de:4,rec:'≈9 months to recover'}};
+function stress(k){
+  const s=SCEN[k];const rows=window._rows||[];if(!rows.length||!s)return;
+  const g=f=>rows.filter(f).reduce((a,b)=>a+b.cur,0);
+  const eq=g(r=>r.grp==='Equity'),hy=g(r=>r.grp==='Hybrid'),go=g(r=>r.grp==='Metal'),de=g(r=>r.grp==='Debt');
+  const tot=eq+hy+go+de;
+  const after=eq*(1+s.eq/100)+hy*(1+s.hy/100)+go*(1+s.gold/100)+de*(1+s.de/100);
+  const dip=after-tot;
+  $('stressOut').innerHTML=`<div class="banner warn" style="margin:8px 0 0">If <b>${s.label}</b> repeated with today's mix: your ${inr(tot)} would dip to about <b>${inr(after)}</b> (${inr(dip)}, ${(dip/tot*100).toFixed(0)}%), with history suggesting ${s.rec}. <b>The plan for that day is made now:</b> investors who kept their SIPs running through both crashes came out ahead of those who stopped. If this number feels unbearable, your equity share is too high — discuss trimming toward target with your adviser <i>before</i> it happens, not during.</div>`;}
+
+/* --- Phase 1: goals with glide path --- */
+function goalCalc(gl,tc,p){
+  const share=Math.max(1,Math.min(100,gl.share||100));
+  const now=new Date().getFullYear();
+  const yrs=Math.max(0.5,gl.yr-now);
+  const r=blendedReturn(targets(p));
+  const cur=tc*share/100;
+  const fv=cur*Math.pow(1+r,yrs);
+  const gap=Math.max(0,gl.amt-fv);
+  const i=r/12,n=Math.round(yrs*12);
+  const sip=gap>0?gap/(((Math.pow(1+i,n)-1)/i)||1):0;
+  return{yrs,cur,fv,gap,sip,onTrack:fv>=gl.amt*0.95};}
+function renderGoals(tc,p){
+  const el=$('goalList');if(!el)return;
+  const goals=LS.g('goals',[]);
+  if(!goals.length){el.innerHTML='<div class="note">No goals yet. A real plan starts with a goal — "Retirement 2048, ₹3 Cr" or "Child\'s education 2032, ₹40 L". Add one below and the app tracks whether you\'re on pace, and tells you when to de-risk as the date nears.</div>';return;}
+  el.innerHTML=goals.map((gl,i)=>{
+    const c=goalCalc(gl,tc,p);
+    const glide=c.yrs<=3?`<div class="why" style="color:var(--amber)">⏳ Glide path: under ${Math.ceil(c.yrs)} yrs to go — money for this goal should be moving out of equity into hybrid/debt in stages now, so a bad year can't wreck the goal.</div>`:'';
+    return `<div class="row"><div style="flex:1">
+      <div class="fname">${esc(gl.n)} <span class="fsub">(${gl.yr}, target ${inr(gl.amt)}, ${gl.share||100}% of portfolio)</span></div>
+      <div class="fsub">Today's share ${inr(c.cur)} → projected ${inr(c.fv)} by ${gl.yr}${c.gap>0?` · shortfall ${inr(c.gap)} → needs ≈<b>${inr(Math.ceil(c.sip/500)*500)}/month</b> extra SIP`:' · fully funded at current pace'}</div>
+      ${glide}</div>
+      <span class="tag ${c.onTrack?'t-ok':'t-watch'}">${c.onTrack?'On pace':'Behind'}</span>
+      <button class="btn-sec" style="padding:6px 9px;margin-left:4px" aria-label="Delete goal" onclick="delGoal(${i})">✕</button></div>`;}).join('');}
+function addGoal(){
+  const n=$('goalName').value.trim(),amt=parseFloat($('goalAmt').value)||0,yr=parseInt($('goalYear').value)||0,share=parseInt($('goalShare').value)||100;
+  const now=new Date().getFullYear();
+  if(!n||amt<=0||yr<=now){alert('Give the goal a name, a target amount, and a year after '+now+'.');return;}
+  const goals=LS.g('goals',[]);goals.push({n:n.slice(0,40),amt,yr,share});LS.s('goals',goals);
+  $('goalName').value='';$('goalAmt').value='';$('goalYear').value='';$('goalShare').value='';
+  renderGoals(window._tot||0,window._p||LS.g('profile',{}));}
+function delGoal(i){const goals=LS.g('goals',[]);goals.splice(i,1);LS.s('goals',goals);renderGoals(window._tot||0,window._p||LS.g('profile',{}));}
+
+/* --- Phase 4: the adviser's diary — actions keyed to the calendar --- */
+function markReviewDone(){LS.s('lastReview',Date.now());const r=window._rows;if(r)renderDiary(r);}
+function renderDiary(rows){
+  const el=$('diary');if(!el)return;
+  const now=new Date(),mth=now.getMonth(),yr=now.getFullYear();
+  const items=[];
+  // Tax year end (Jan–Mar): LTCG harvesting against the exemption
+  if(mth<=2){const lt=rows.filter(r=>r.year&&(yr-r.year)>=1&&r.pl>0);
+    const gains=lt.reduce((a,r)=>a+r.pl,0);
+    if(gains>0)items.push(`🧾 <b>Before 31 March:</b> you're sitting on ≈${inr(gains)} of long-term gains in ${lt.length} fund(s). Up to ₹1.25 L of equity LTCG is tax-exempt each FY — selling and re-buying ("harvesting") can reset your cost base for free. Verify current limits with your adviser.`);}
+  // April: SIP step-up with the annual increment
+  if(mth===3)items.push(`📈 <b>April step-up:</b> increase your SIPs by 10% with your increment. On a 20-year runway a yearly 10% step-up roughly <b>doubles</b> the final corpus vs a flat SIP — the single cheapest improvement available.`);
+  // Exit-load windows opening (bought last year)
+  const el1=rows.filter(r=>r.year===yr-1);
+  if(el1.length)items.push(`🔓 <b>Exit-load windows:</b> ${el1.map(r=>esc(r.name.split(' ').slice(0,3).join(' '))).join(', ')} cross the 1-year mark this year — switches or rebalancing in these are typically load-free now (check each scheme's rule).`);
+  // Underperformers from the quality watch
+  const perf=LS.g('perf',{}),bp=LS.g('benchPerf',null);
+  if(bp&&bp.r1!=null){const lag=rows.filter(r=>{const p=perf[r.code];return p&&r.grp==='Equity'&&p.r1!=null&&p.r3!=null&&p.r1<bp.r1-3&&p.r3<bp.r3-2;});
+    if(lag.length)items.push(`📉 <b>Quality watch:</b> ${lag.map(r=>esc(r.name.split(' ').slice(0,3).join(' '))).join(', ')} lagging the index on both 1-yr and 3-yr returns. One bad year is noise; two-plus years is a pattern — put it on the agenda for your next review, don't act on impulse.`);}
+  // Half-yearly review cadence
+  const lastRev=LS.g('lastReview',0),days=Math.floor((Date.now()-lastRev)/864e5);
+  if(!lastRev||days>182)items.push(`🔍 <b>Half-yearly review due${lastRev?` (last one ${Math.floor(days/30)} months ago)`:''}:</b> check ① allocation vs target ② each fund vs its index ③ SIP amounts vs income ④ goal progress above. 20 minutes, twice a year — that's the whole job. <a href="#" onclick="markReviewDone();return false"><b>Mark done</b></a>`);
+  const st=marketStance();
+  if(st.read)items.push(`🌡️ <b>Market read:</b> ${st.note}.`);
+  el.innerHTML=`<div class="card" style="border-left:4px solid var(--blue)"><p style="font-size:15px;font-weight:700;margin:0 0 8px">📅 This month — ${['January','February','March','April','May','June','July','August','September','October','November','December'][mth]} ${yr}</p>${
+    items.length?items.map(x=>`<div class="note" style="margin-bottom:8px;color:var(--ink)">${x}</div>`).join(''):
+    '<div class="note">No calendar actions this month. In investing, the best action is usually none — let the SIPs run.</div>'}
+    <div class="note" style="color:var(--muted);font-size:11px">Educational prompts from a transparent rules calendar — not advice.</div></div>`;}
 
 /* Rebalancing illustration: concrete "shift ₹X from over-weight to under-weight"
    pairs vs the reference mix. Educational — exit loads and tax apply to real moves. */
@@ -686,6 +792,15 @@ async function loadBenchmark(rows){
     if(!code)return;
     const hist=await getNavHistory(code);if(!hist||!hist.length)return;
     const latest=parseFloat(hist[0].nav);
+    /* Phase 2+3: market stance (vs 200-day trend & 52-week high) and index r1/r3. */
+    try{
+      const n200=Math.min(200,hist.length);let sma=0;for(let i=0;i<n200;i++)sma+=parseFloat(hist[i].nav);sma/=n200;
+      const t0=_navDate(hist[0].date);let hi52=0;
+      for(const d of hist){if(_navDate(d.date)<t0-365*864e5)break;const v=parseFloat(d.nav);if(v>hi52)hi52=v;}
+      LS.s('mkt',{t:Date.now(),dev:(latest/sma-1)*100,pos:hi52>0?(latest/hi52-1)*100:0});
+      const bp=computePerf(hist);if(bp)LS.s('benchPerf',bp);
+      if(window._rows)renderDiary(window._rows); // refresh diary with the new market read
+    }catch(e){}
     const tgt=new Date(y0,6,1).getTime();
     let past=null; // hist is newest-first, dates dd-mm-yyyy
     for(const d of hist){const m=d.date.match(/(\d{2})-(\d{2})-(\d{4})/);if(!m)continue;
@@ -855,11 +970,18 @@ function drawHold(){
         :'<span class="lag">statement value — live NAV unverified ⚠</span>');
     const approx=h.unitsApprox?' · units approx':'';
     const day=(h.dayCh!=null&&isFinite(h.dayCh))?` · <span style="color:${h.dayCh<0?'var(--red)':'var(--green)'}">${h.dayCh<0?'▼':'▲'}${Math.abs(h.dayCh).toFixed(2)}% today</span>`:'';
+    /* Phase 2/3: drawdown coaching + performance vs the index */
+    const pf=(LS.g('perf',{})||{})[h.code];const bp=LS.g('benchPerf',null);
+    let perfLn='';
+    if(pf&&pf.dd!=null&&pf.dd<-12){const normal=(h.cat==='Small Cap'||h.cat==='Mid Cap'||h.grp==='Metal');
+      perfLn=`<div class="fsub" style="color:var(--amber)">${Math.abs(pf.dd).toFixed(0)}% below its 3-yr peak${normal?' — swings this size are normal for this category; the plan is to hold, not react':''}</div>`;}
+    if(bp&&pf&&h.grp==='Equity'&&pf.r1!=null&&bp.r1!=null&&pf.r3!=null&&bp.r3!=null&&pf.r1<bp.r1-3&&pf.r3<bp.r3-2)
+      perfLn+=`<div class="fsub" style="color:var(--amber)">📉 behind the index over 1 yr (${pf.r1.toFixed(1)}% vs ${bp.r1.toFixed(1)}%) and 3 yrs — on the review agenda</div>`;
     const newsln=h.news?`<div class="why" style="color:var(--blue)">${h.news}</div>`:'';
     const offln=h.official&&h.official.toLowerCase().slice(0,18)!==h.name.toLowerCase().slice(0,18)?`<div class="fsub">matched: ${esc(h.official)}</div>`:'';
     return `<div class="row"><div style="flex:1"><div class="fname">${esc(h.name)}</div>${offln}
       <div class="fsub">${inr(h.inv)} → ${inr(h.cur)} (${h.pl<0?'−':'+'}${inr(Math.abs(h.pl))}) · ${fundReturnTxt(h)}</div>
-      <div class="fsub">${dtxt}${approx}${day}</div>
+      <div class="fsub">${dtxt}${approx}${day}</div>${perfLn}
       <div class="why">${h.why}</div>${newsln}</div><span class="tag t-${h.verdict}">${h.vlabel}</span></div>`;}).join(''):'<div class="note" style="padding:8px 0">No funds in this group.</div>';}
 document.querySelectorAll('#holdFilters button').forEach(b=>b.onclick=()=>{HOLDF=b.dataset.f;drawHold();});
 
@@ -912,9 +1034,10 @@ function planGrow(){
   const aTot=tot+newAmt;
   const posAfter=`Equity ${(after.equity/aTot*100).toFixed(0)}% · Hybrid ${(after.hybrid/aTot*100).toFixed(0)}% · Gold ${(after.gold/aTot*100).toFixed(0)}% · Debt ${(after.debt/aTot*100).toFixed(0)}%`;
   const big=newAmt>tot*0.12;
+  const st=marketStance(); // Phase 2: deployment speed follows the market, like a real adviser
   const exec=big
-    ?`This is a meaningful sum relative to your portfolio (~${(newAmt/tot*100).toFixed(0)}% of it) — most advisers would stagger it over 2–3 months rather than invest in one day. Use the <b>Buy calendar</b> below with these same numbers.`
-    :`At this size, investing in one go on your usual date is fine — staggering adds little.`;
+    ?`This is a meaningful sum relative to your portfolio (~${(newAmt/tot*100).toFixed(0)}% of it) — and ${st.note}. Stagger it over <b>${st.months} months</b> using the <b>Buy calendar</b> below with these same numbers.`
+    :`At this size, investing in one go on your usual date is fine — staggering adds little. (Market read: ${st.note}.)`;
   const tagc=a=>a==='NEW'?'t-review':'t-watch';
   $('growOut').innerHTML=
    `<div class="note" style="margin-bottom:6px"><b>Where you stand:</b> ${pos}.</div>
@@ -935,7 +1058,9 @@ function planCal(){
   // Per fund: split its total across months, ₹100-rounded, remainder in the final month.
   chosen.forEach(c=>{c.per=Math.round(c.amt/months/100)*100;c.last=c.amt-c.per*(months-1);});
   const mBias=(sig&&(sig.items.market||sig.items.nifty)||{}).bias||0;
-  const tone=mBias>0?'Signals lean positive — keeping to your dates looks reasonable.':mBias<0?'Signals lean cautious — stick to the staggered dates, don\'t front-load.':'No strong market signal — steady staggering is the safe default.';
+  const st=marketStance();
+  const tone=(mBias>0?'Signals lean positive — keeping to your dates looks reasonable. ':mBias<0?'Signals lean cautious — stick to the staggered dates, don\'t front-load. ':'')+
+    `Market read: ${st.note}${months!==st.months?` (a ${st.months}-month spread would fit the current market)`:''}.`;
   const mNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const now=new Date();
   let rows='';
@@ -997,7 +1122,7 @@ function showPrompt(t){
 }
 
 /* ---------- backup / restore ---------- */
-const BK_KEYS=['profile','holdings','navs','navDates','navTs','history','signals','consent'];
+const BK_KEYS=['profile','holdings','navs','navDates','navTs','history','signals','consent','goals','lastReview','perf','benchPerf','benchCode','navPrev'];
 function exportData(){
   const data={};BK_KEYS.forEach(k=>{const v=LS.g(k,null);if(v!=null)data[k]=v;});
   if(!data.holdings){$('dataMsg').textContent='Nothing to export yet.';return;}
