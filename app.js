@@ -2,7 +2,7 @@
    v2.0: personal data removed, plan-aware AMFI matching, scored risk profile,
    educational (non-advisory) language, CAS PDF import (beta), backup/restore,
    AMFI NAV fallback, approx CAGR, projection ranges, HTML escaping. */
-const APP_VERSION='4.0 · build 35';
+const APP_VERSION='4.1 · build 36';
 const NAV_SRCS=[c=>`https://api.mfapi.in/mf/${c}`,c=>`https://api.mfapi.in/mf/${c}/latest`]; // full history first: also yields yesterday's NAV for day-change
 const SEARCH=q=>`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
 const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
@@ -161,7 +161,7 @@ async function getNavHistory(code){
    and renamed schemes (e.g. "Nippon India Growth Mid Cap Fund" vs AMFI's
    "Nippon India Growth Fund") via token-set similarity, not substring luck. */
 function normFund(s){return String(s).toLowerCase()
-  .replace(/([a-z])(etf|fof)\b/g,'$1 $2') // OCR glue: "goldetf fof" -> "gold etf fof"
+  .replace(/([a-z])(etf|fof|fund|cap)\b/g,'$1 $2') // OCR glue: "goldetf fof" -> "gold etf fof", "goldfund" -> "gold fund", "smallcap" -> "small cap"
   .replace(/\bfof\b/g,'fund of fund')
   .replace(/&/g,' and ')
   .replace(/[-–—()]/g,' ')
@@ -317,7 +317,7 @@ function parsePortfolio(text){
       .replace(/\s*[-–—]\s*(regular|direct)?\s*(plan)?\s*(gr(owth)?)\b.*$/i,'')
       .replace(/\s*[-–—]\s*(idcw|dividend|payout|reinvest).*$/i,'')
       .replace(/[↗➔→»➜↑]+/g,'').replace(/^[^A-Za-z]+/,'')
-      .replace(/([a-z])(ETF|FoF)\b/g,'$1 $2') // un-glue "GoldETF FoF"
+      .replace(/([a-z])(ETF|FoF|Fund)\b/g,'$1 $2') // un-glue "GoldETF FoF", "GoldFund"
       .replace(/\s{2,}/g,' ').trim();
     if(name.length<6)continue;
     let end=Math.min(lines.length,i+9);
@@ -457,8 +457,8 @@ function updateEditTotals(){
   el.classList.remove('hide');
   let extra=' Check these against the total on your statement.';
   if(_stmtTot){
-    const okI=Math.abs(ti-_stmtTot.inv)<=Math.max(10,_stmtTot.inv*0.002);
-    const okC=Math.abs(tc-_stmtTot.cur)<=Math.max(10,_stmtTot.cur*0.002);
+    const okI=Math.abs(ti-_stmtTot.inv)<=Math.max(10,_stmtTot.inv*0.005);
+    const okC=Math.abs(tc-_stmtTot.cur)<=Math.max(10,_stmtTot.cur*0.005);
     extra=(okI&&okC)
       ?` <span style="color:var(--green)">✓ Matches the summary totals read from your statement (${inr(_stmtTot.inv)} / ${inr(_stmtTot.cur)}).</span>`
       :` <span style="color:var(--amber)">⚠ Your statement's summary says invested ${inr(_stmtTot.inv)} / current ${inr(_stmtTot.cur)} — the rows don't add up to that yet. Fix the highlighted amounts before building.</span>`;}
@@ -473,8 +473,8 @@ function renderEdit(){
       <a href="#" class="small" style="font-size:10.5px" onclick="rescanRow(${i});return false">📷 rescan this fund</a></div>`:''}
     <input value="${esc(r.name)}" placeholder="Fund name" aria-label="Fund name" oninput="editRows[${i}].name=this.value">
     <div class="editrow" style="margin-top:7px">
-      <input type="number" inputmode="numeric" value="${r.inv||''}" placeholder="Invested ₹" aria-label="Invested amount" style="${bord}" oninput="editRows[${i}].inv=parseFloat(this.value)||0;editRows[${i}].flag=false;this.style.border='1px solid var(--line)';updateEditTotals()">
-      <input type="number" inputmode="numeric" value="${r.cur||''}" placeholder="Current ₹" aria-label="Current value" style="${bord}" oninput="editRows[${i}].cur=parseFloat(this.value)||0;editRows[${i}].flag=false;this.style.border='1px solid var(--line)';updateEditTotals()">
+      <input type="number" inputmode="decimal" step="any" value="${r.inv||''}" placeholder="Invested ₹" aria-label="Invested amount" style="${bord}" oninput="editRows[${i}].inv=parseFloat(this.value)||0;editRows[${i}].flag=false;this.style.border='1px solid var(--line)';updateEditTotals()">
+      <input type="number" inputmode="decimal" step="any" value="${r.cur||''}" placeholder="Current ₹" aria-label="Current value" style="${bord}" oninput="editRows[${i}].cur=parseFloat(this.value)||0;editRows[${i}].flag=false;this.style.border='1px solid var(--line)';updateEditTotals()">
       <button class="btn-sec" style="padding:9px 0" aria-label="Remove fund" onclick="editRows.splice(${i},1);renderEdit()">✕</button>
     </div>
     <div class="editrow" style="grid-template-columns:1fr 1fr 34px">
@@ -617,7 +617,7 @@ function renderDash(holds,navs,dates,live){
   updateSigStatus();
   loadNews();
   // history + trend (with projection tail)
-  let hist=LS.g('history',[]);const today=now.toISOString().slice(0,10);
+  let hist=LS.g('history',[]);const today=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10); // local date, not UTC
   hist=hist.filter(x=>x.date!==today);hist.push({date:today,cur:Math.round(tc)});hist.sort((a,b)=>a.date.localeCompare(b.date));
   if(hist.length>120)hist=hist.slice(-120);LS.s('history',hist);
   const m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1196,6 +1196,7 @@ const HI={
  h_grow:'नया निवेश कैसे बाँटें', g_amt:'कितना नया पैसा लगाना है?', g_plan:'प्लान', g_reset:'रीसेट',
  h_cal:'खरीद कैलेंडर', c_amt:'राशि', c_mo:'महीने', c_build:'बनाएं',
  h_notes:'समझने लायक बातें', h_sig:'समाचार-आधारित संकेत',
+ h_goals:'आपके लक्ष्य', h_stress:'स्ट्रेस टेस्ट — क्या आप गिरावट सह पाएँगे?',
  sg_copy:'न्यूज़ प्रॉम्प्ट कॉपी करें', sg_paste:'नतीजा पेस्ट करें', sg_apply:'संकेत लागू करें', sg_clear:'हटाएँ',
  h_news:'बाज़ार और MF समाचार', h_ai:'पूरा AI रिव्यू लें',
  ai_help:'आपकी प्रोफ़ाइल और होल्डिंग्स के साथ तैयार प्रॉम्प्ट कॉपी होगा। इसे Claude / ChatGPT / Gemini में पेस्ट करें। फंड के नाम और राशियाँ उस AI सेवा को दिखेंगी — खाता नंबर शामिल नहीं होते।',
@@ -1245,7 +1246,8 @@ function reupload(){show('setup');loadProfileForm();$('shots').value='';$('shotc
 function editProfile(){show('setup');loadProfileForm();}
 function resetApp(){
   if(!confirm('Clear ALL saved data (profile, holdings, history, signals) and start fresh? This cannot be undone. Consider exporting a backup first.'))return;
-  ['holdings','navs','navDates','navTs','history','profile','signals','news','consent'].forEach(k=>localStorage.removeItem(k));
+  ['holdings','navs','navDates','navTs','history','profile','signals','news','consent',
+   'goals','lastReview','perf','benchPerf','benchCode','navPrev','mkt','lastOCR'].forEach(k=>localStorage.removeItem(k));
   location.reload();}
 
 /* ---------- events & init ---------- */
